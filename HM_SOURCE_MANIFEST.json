@@ -16659,8 +16659,9 @@
       "bytes": 2859
     },
     "Tests/Python/res/test_ogs_log_summary/.gitattributes": {
-      "sha256": "154c56e1bc6a01acc63b2bd2e118d40972dbe80ec878beaf628cc64358d8c69f",
-      "bytes": 112
+      "sha256": "aefaa4df05d3d91272930fe7422c2202fc7941c31e4bc2729cad546fbfb58066",
+      "bytes": 276,
+      "original_source_sha256": "154c56e1bc6a01acc63b2bd2e118d40972dbe80ec878beaf628cc64358d8c69f"
     },
     "Tests/Python/res/test_ogs_log_summary/arch-ci-job-ogs-ThermoRichardsMechanics_MFront_BentoniteBehaviourGeneralMod230824_02-ramp_bentonite_ramped_Neumann_BC.txt": {
       "sha256": "b28a93db219865d0fd67be331d7a679cbec25de0cbe7321895c246f70563e530",
@@ -17526,5 +17527,10 @@
       "sha256": "faba36044c76f494c371c135ed6c24b063cbb00c7d68bbd406da9c1210928e38",
       "bytes": 3555
     }
-  }
+  },
+  "publication_metadata_files": [
+    "ogs/scripts/cmake/.gitattributes",
+    "ogs/Tests/Python/res/test_ogs_log_summary/.gitattributes"
+  ],
+  "publication_note": "Directory-specific Git attributes preserve three upstream CRLF files exactly; solver source is unchanged."
 }

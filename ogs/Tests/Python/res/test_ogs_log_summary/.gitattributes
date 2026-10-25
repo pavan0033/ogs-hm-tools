@@ -1,1 +1,4 @@
 windows-ogs-HydroMechanics_StaggeredScheme_ConsolidationBenchmark_consolidation_benchmark-omp.txt text eol=crlf
+
+# Preserve the upstream Windows log fixture byte for byte.
+windows-ogs-HydroMechanics_StaggeredScheme_ConsolidationBenchmark_consolidation_benchmark-omp.txt -text

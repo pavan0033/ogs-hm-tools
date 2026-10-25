@@ -1,0 +1,4 @@
+
+# Preserve exported upstream patch bytes.
+gklib.patch -text
+metis-generic-build.patch -text
