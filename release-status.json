@@ -1,0 +1,15 @@
+{
+  "public_wheel_uploaded": false,
+  "wheel_name": "ogs_hm_tools-0.1.0.dev0-cp312-cp312-linux_x86_64.whl",
+  "wheel_sha256": "2647f8a65fd4a0c5feab2b4fc75c9831c51fb89cfd502206d2351ceeb0a997aa",
+  "matches_recorded_tested_wheel": true,
+  "release_checks": {
+    "github_connection": "authenticated as pavan0033",
+    "bundled_license_review": "pending",
+    "clean_machine_test": "pending",
+    "public_download_url": "pending"
+  },
+  "platform": "Linux x86_64, CPython 3.12",
+  "existing_test_scope": "isolated Python environment on development host; not a clean OS test",
+  "repository_url": "https://github.com/pavan0033/ogs-hm-tools"
+}

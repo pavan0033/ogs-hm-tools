@@ -1,0 +1,19 @@
+Release preparation
+===================
+
+This folder is separate from the private development tree and contains only
+reviewable public documentation and notebooks with execution outputs removed.
+The native wheel is deliberately excluded from Git history. Attach the final
+reviewed wheel and checksum as release assets rather than committing binaries.
+
+Before releasing the native package:
+1. Finish exact bundled-dependency license inventory and required source/notices.
+2. Test on a clean target Linux VM/container, including notebook execution.
+3. Finalize contributor credit and version; rebuild and verify the final artifact.
+4. Repository destination: https://github.com/pavan0033/ogs-hm-tools.
+5. Attach the verified wheel/checksum to a versioned release.
+6. Replace local wheel discovery with the real versioned, checksum-verified URL.
+7. Verify unauthenticated installation from outside the development environment.
+
+GitHub authentication verified for pavan0033. The existing private development
+repository remains unchanged.
