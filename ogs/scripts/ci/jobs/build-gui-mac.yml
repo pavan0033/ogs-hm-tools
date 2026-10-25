@@ -1,0 +1,20 @@
+build gui mac:
+  extends:
+    - .template-build-linux
+    - .test-artifacts
+  stage: build
+  tags: [mac, arm64]
+  needs: [meta]
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS =~ /.*ci::gui only.*/
+    - if: '$CI_COMMIT_BRANCH == "master"'
+    - changes:
+        - Applications/DataExplorer/**/*
+        - scripts/ci/jobs/build-gui-mac.yml
+    - when: manual
+      allow_failure: true
+  variables:
+    CMAKE_PRESET: release-gui
+    CMAKE_ARGS: >-
+      -DOGS_USE_NETCDF=OFF
+      -DQt5_DIR=/opt/qt/latest/lib/cmake/Qt5

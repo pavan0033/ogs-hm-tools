@@ -1,0 +1,215 @@
+if (NOT (OGS_USE_MPI OR OGS_USE_LIS))
+    if (OGS_USE_MFRONT)
+        if(OGS_USE_MKL)
+            OgsTest(PROJECTFILE Mechanics/SlopeStabilityAnchors/fault_slip_SD_noniterWP_reference.prj RUNTIME 25)
+            OgsTest(PROJECTFILE Mechanics/SlopeStabilityAnchors/fault_slip_SD_noniterWP_anchors.xml RUNTIME 16)
+            OgsTest(PROJECTFILE Mechanics/SlopeStabilityAnchors/fault_slip_SD_noniterWP_anchors_prestress.xml RUNTIME 12)
+        endif()
+    endif()
+    OgsTest(PROJECTFILE Mechanics/OverwriteMeshData/overwrite_mesh_data.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/square_1e0.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/square_1e2.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/EmbeddedAnchorSourceTerm/beam_two_material.prj)
+    if(OGS_USE_EIGEN_UNSUPPORTED)
+        OgsTest(PROJECTFILE Mechanics/Linear/square_1e2_IDRS.xml)
+        OgsTest(PROJECTFILE Mechanics/Linear/square_1e2_IDRSTABL.xml)
+        OgsTest(PROJECTFILE Mechanics/Linear/square_1e2_BiCGSTABL.xml)
+    endif()
+    OgsTest(PROJECTFILE Mechanics/Linear/disc_with_hole.prj)
+    if(NOT ENABLE_ASAN)
+        OgsTest(PROJECTFILE Mechanics/Linear/ElementDeactivation3D/element_deactivation_M_3D.prj RUNTIME 2)
+        OgsTest(PROJECTFILE Mechanics/Linear/ElementDeactivation3D/element_deactivation_M_3D.prj
+            PATCH_FILES failcase_duplicate_id_list.xml
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION "Multiple media were specified for the same material id '1'."
+        )
+        OgsTest(PROJECTFILE Mechanics/Linear/ElementDeactivation3D/element_deactivation_M_3D.prj
+            PATCH_FILES failcase_duplicate_id_0.xml
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION "Multiple media were specified for the same material id '0'."
+        )
+        OgsTest(PROJECTFILE Mechanics/Linear/ElementDeactivation3D/element_deactivation_M_3D.prj
+            PATCH_FILES failcase_duplicate_id_1.xml
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION "Multiple media were specified for the same material id '1'."
+        )
+    endif()
+    OgsTest(PROJECTFILE Mechanics/Linear/square_1e5.prj RUNTIME 41)
+    OgsTest(PROJECTFILE Mechanics/Linear/square_1e2_quad8_traction_top.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/cube_1e0.prj)
+    if(OGS_USE_MKL)
+        OgsTest(PROJECTFILE Mechanics/Linear/cube_1e0_mkl.xml
+            PROPERTIES DEPENDS ogs-Mechanics/Linear/cube_1e0
+        )
+    endif()
+    OgsTest(PROJECTFILE Mechanics/Linear/cube_1e0_simple_shear.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/MaterialForces/bar.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/MaterialForces/bar_3D.prj RUNTIME 7)
+    OgsTest(PROJECTFILE Mechanics/Linear/Orthotropy/cube_1e0_orthotropic_xyz.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/Orthotropy/cube_1e0_orthotropic_yzx.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/Orthotropy/cube_1e0_orthotropic_zxy.prj)
+    if(NOT ENABLE_ASAN)
+        OgsTest(PROJECTFILE Mechanics/Linear/Orthotropy/m3_3Dshearz.prj RUNTIME 2)
+        OgsTest(PROJECTFILE Mechanics/Linear/Orthotropy/m3_3Dshearz_rot.prj RUNTIME 2)
+        OgsTest(PROJECTFILE Mechanics/Ehlers/cube_1e1.prj RUNTIME 4)
+    endif()
+    OgsTest(PROJECTFILE Mechanics/Linear/Orthotropy/m3_3Dtopload.prj RUNTIME 3)
+    OgsTest(PROJECTFILE Mechanics/Linear/Orthotropy/m3_3Dtoploadlc.prj RUNTIME 3)
+    OgsTest(PROJECTFILE Mechanics/Linear/Orthotropy/square_1e0_orthotropic_xyz.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/Orthotropy/square_1e0_orthotropic_45xy_z.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/Orthotropy/square_1e0_orthotropic_y-xz.prj)
+    OgsTest(PROJECTFILE Mechanics/Burgers/cube_1e0.prj)
+    OgsTest(PROJECTFILE Mechanics/Burgers/cube_1e3.prj RUNTIME 23)
+    OgsTest(PROJECTFILE Mechanics/Ehlers/cube_1e0.prj)
+    OgsTest(PROJECTFILE Mechanics/Ehlers/cube_1e3.prj RUNTIME 222)
+    OgsTest(PROJECTFILE Mechanics/Ehlers/cube_1e0_dp.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/two_material_gravity.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/two_material_gravity_Emodulus.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/PressureBC/axisymmetric_pipe.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/PressureBC/hollow_sphere.prj RUNTIME 99)
+    OgsTest(PROJECTFILE Mechanics/Linear/PressureBC/axisymmetric_sphere.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/square_with_deactivated_hole.prj)
+    OgsTest(PROJECTFILE Mechanics/Ehlers/axisymmetric_sphere_pl.prj RUNTIME 42)
+    OgsTest(PROJECTFILE Mechanics/InitialStates/into_initial_state.prj)
+    OgsTest(PROJECTFILE Mechanics/InitialStates/equilibrium_restart.prj)
+    OgsTest(PROJECTFILE Mechanics/InitialStates/non_equilibrium_initial_state.prj)
+    OgsTest(PROJECTFILE Mechanics/InitialStates/soil_column_nonequilibrium_sigma_elementwise.prj)
+    OgsTest(PROJECTFILE Mechanics/Excavation/time_linear_excavation.prj RUNTIME 1)
+    OgsTest(PROJECTFILE Mechanics/CooksMembrane/CooksMembrane.prj RUNTIME 1)
+    OgsTest(PROJECTFILE Mechanics/CooksMembrane/CooksMembraneSDRefinedMesh10.xml RUNTIME 1)
+    OgsTest(PROJECTFILE Mechanics/CooksMembrane/CooksMembraneSDRefinedMesh15.xml RUNTIME 1)
+    OgsTest(PROJECTFILE Mechanics/CooksMembrane/CooksMembraneSDRefinedMesh20.xml RUNTIME 1)
+    OgsTest(PROJECTFILE Mechanics/CooksMembrane/CooksMembraneSDRefinedMesh25.xml RUNTIME 1)
+    OgsTest(PROJECTFILE Mechanics/CooksMembrane/CooksMembraneSDRefinedMesh30.xml RUNTIME 1)
+    OgsTest(PROJECTFILE Mechanics/CooksMembrane/3D/CooksMembrane_3D.prj RUNTIME 1)
+endif()
+
+# For EIGEN and LIS
+if(NOT OGS_USE_MPI)
+    OgsTest(PROJECTFILE Mechanics/Linear/ring_plane_strain.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/plain_strain_pipe.prj)
+endif()
+
+if(NOT OGS_USE_LIS)
+    OgsTest(PROJECTFILE Mechanics/Linear/PythonPiston/piston.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/PythonHertzContact/hertz_contact.prj RUNTIME 18)
+endif()
+
+if(OGS_USE_MPI)
+    # OgsTest(WRAPPER mpirun -np 4 PROJECTFILE Mechanics/Linear/disc_with_hole.prj)
+    OgsTest(WRAPPER mpirun -np 2 PROJECTFILE Mechanics/InitialStates/soil_column_nonequilibrium_sigma_elementwise.prj)
+    OgsTest(PROJECTFILE Mechanics/Ehlers/cube_1e0_SNES.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/square_1e0_SNES.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/cube_1e0_SNES.prj)
+endif()
+
+if(OGS_USE_MFRONT AND (NOT OGS_USE_LIS))
+    OgsTest(PROJECTFILE Mechanics/MohrCoulombAbboSloan/slope.prj RUNTIME 15
+        PROPERTIES PASS_REGULAR_EXPRESSION "The nonlinear solver failed in time step #.* at t = 5.37.* s for process #0"
+    )
+    OgsTest(PROJECTFILE Mechanics/MohrCoulombAbboSloan/load_test_mc.prj)
+    if(OGS_USE_MPI)
+        OgsTest(WRAPPER mpirun -np 4 PROJECTFILE Mechanics/MohrCoulombAbboSloan/PetscMpi/slope_hexa.prj
+            RUNTIME 1200)
+    endif()
+    OgsTest(PROJECTFILE Mechanics/MohrCoulombAbboSloanAnisotropic/triax_1e0_47.prj)
+    OgsTest(PROJECTFILE Mechanics/MohrCoulombAbboSloanAnisotropic/triax_ortho_1e0_47.prj)
+    OgsTest(PROJECTFILE Mechanics/MohrCoulombAbboSloanAnisotropic/triax_aniso_1e0_47.prj)
+    OgsTest(PROJECTFILE Mechanics/SofteningExcavation/softening_excavation.prj RUNTIME 2)
+    #TODO (naumov) enable when output file format can be specified
+    #OgsTest(PROJECTFILE Mechanics/MohrCoulombAbboSloan/oedometer.prj RUNTIME 80)
+    OgsTest(PROJECTFILE Mechanics/Linear/MFront/cube_1e0_orthotropic_xyz.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/MFront/cube_1e0_orthotropic_yzx.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/MFront/cube_1e0_orthotropic_zxy.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/MFront/square_1e0_orthotropic_xyz.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/MFront/square_1e0_orthotropic_45xy_z.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/MFront/square_1e0_orthotropic_y-xz.prj)
+    OgsTest(PROJECTFILE Mechanics/Burgers/cube_1e0_mfront.prj)
+    OgsTest(PROJECTFILE Mechanics/Burgers/cube_1e0_mfront_mod.prj)
+    OgsTest(PROJECTFILE Mechanics/ModifiedCamClay/square_1e0_shear.prj)
+    OgsTest(PROJECTFILE Mechanics/ModifiedCamClay/square_1e0_biax.prj)
+    OgsTest(PROJECTFILE Mechanics/ModifiedCamClay/triaxtest.prj)
+    OgsTest(PROJECTFILE Mechanics/ModifiedCamClay/triaxtest_original.prj)
+    OgsTest(PROJECTFILE Mechanics/ModifiedCamClay/triaxtest_original_abs.prj)
+    OgsTest(PROJECTFILE Mechanics/Ehlers/MFront/square_1e1_2_matIDs.prj RUNTIME 1)
+    OgsTest(PROJECTFILE Mechanics/Ehlers/MFront/square_1e1_2_matIDs_restart.prj RUNTIME 1)
+    OgsTest(PROJECTFILE Mechanics/Ehlers/MFront/two_material_ids_single_solid.prj RUNTIME 1)
+    OgsTest(PROJECTFILE Mechanics/HoekBrown/load_test_hb_nonassociated.prj RUNTIME 6)
+    if(NOT OGS_USE_MPI)
+        OgsTest(PROJECTFILE Mechanics/GuentherSalzer/model_uniaxial_test.prj)
+        # OgsTest(PROJECTFILE Mechanics/GuentherSalzer/model_triaxial_test.prj RUNTIME 100) TODO (tnagel) Disabled due to instability.
+    endif()
+    OgsTest(PROJECTFILE Mechanics/PLLC/uniax_compression.prj)
+
+    if(NOT OGS_USE_MPI)
+        # Linear elastic, no internal state variables, no external state variables.
+        OgsTest(PROJECTFILE Mechanics/Linear/MFront/disc_with_hole/disc_with_hole.prj)
+
+        # Tests that internal state variables work correctly.
+        OgsTest(PROJECTFILE Mechanics/Ehlers/MFront/cube_1e0_dp.prj)
+
+        # Tests that axial symmetry works correctly.
+        # NB: Currently (2018-11-06) the plane strain hypothesis is used within MFront!
+        OgsTest(PROJECTFILE Mechanics/Linear/MFront/axisymm_ring/ring_plane_strain.prj)
+    endif()
+
+endif()
+
+if(NOT OGS_USE_LIS)
+    if(NOT OGS_USE_MPI)
+        OgsTest(PROJECTFILE Mechanics/m1_1Dload/m1_1Dload.prj)
+        OgsTest(PROJECTFILE Mechanics/m1_1Dlozenge/m1_1Dlozenge.prj)
+        OgsTest(PROJECTFILE Mechanics/m1_2Dload/m1_2Dload.prj)
+
+        if(OGS_USE_MFRONT)
+            OgsTest(PROJECTFILE Mechanics/m1_3Dbottom/m1_3Dbottom.prj)
+        endif()
+
+        OgsTest(PROJECTFILE Mechanics/m1_3Dgravity/m1_3Dgravity.prj)
+        OgsTest(PROJECTFILE Mechanics/m1_3Dload/m1_3Dload.prj)
+        OgsTest(PROJECTFILE Mechanics/m1_3Dsquare/m1_3Dsquare.prj RUNTIME 9)
+        OgsTest(PROJECTFILE Mechanics/m1_3Dtopload/m1_3Dtopload.prj RUNTIME 3)
+
+        # Tests for Principal Stress Output
+        OgsTest(PROJECTFILE Mechanics/Linear/PrincipalStress/sphere.prj)
+        OgsTest(PROJECTFILE Mechanics/TransverseElasticModel/m_e_transiso_2D.prj)
+        OgsTest(
+            PROJECTFILE
+                Mechanics/CreepWithHeterogeneousReferenceTemperature/arehs-salt-M_gravity_only_element_refT.prj
+            RUNTIME 32
+        )
+        OgsTest(PROJECTFILE Mechanics/AxisymmetryBbar/axisymmetry_bbar.prj RUNTIME 1)
+        OgsTest(PROJECTFILE Mechanics/Simple3DBbar/simple_3d_bbar.prj RUNTIME 1)
+        OgsTest(
+            PROJECTFILE Mechanics/Linear/cube_1e0_fail_lin_solver.xml
+            RUNTIME 1
+            PROPERTIES PASS_REGULAR_EXPRESSION "Time stepper cannot reduce the time step size further[.]"
+        )
+    endif()
+
+    NotebookTest(NOTEBOOKFILE Mechanics/Linear/test_ip_data/2D-clamped-gravity.py RUNTIME 4 SKIP_WEB)
+    OgsTest(PROJECTFILE Mechanics/Linear/test_ip_data/square_1e2_test_ip_data.prj)
+    OgsTest(PROJECTFILE Mechanics/Linear/NormalTraction/normal_traction.prj)
+endif()
+
+if(NOT (OGS_USE_PETSC OR OGS_USE_LIS))
+    NotebookTest(NOTEBOOKFILE Mechanics/CooksMembrane/CooksMembraneBbar.py RUNTIME 10)
+    NotebookTest(NOTEBOOKFILE Mechanics/Linear/SimpleMechanics.py RUNTIME 5)
+    NotebookTest(NOTEBOOKFILE Mechanics/EvaluatingBbarWithSimpleExamples/evaluating_bbbar_with_simple_examples.py RUNTIME 20)
+    NotebookTest(NOTEBOOKFILE Mechanics/Linear/DiscWithHole/Linear_Disc_with_hole.py RUNTIME 8)
+    NotebookTest(NOTEBOOKFILE Mechanics/ReleaseNodalForceKirsch/kirsch.py RUNTIME 20)
+    if(NOT WIN32)
+        NotebookTest(NOTEBOOKFILE Mechanics/Linear/DiscWithHole_convergence_study/Linear_Disc_with_hole_convergence_analysis.py RUNTIME 35)
+    endif()
+    if (OGS_USE_MFRONT)
+        NotebookTest(NOTEBOOKFILE Mechanics/PLLC/PLLC.py RUNTIME 7)
+        NotebookTest(NOTEBOOKFILE Mechanics/MohrCoulombAbboSloan/FOS_SlopeStability/FOS_SlopeStability.py RUNTIME 265)
+        if(TFEL_WITH_PYTHON)
+            NotebookTest(NOTEBOOKFILE Mechanics/HoekBrown/HoekBrownYieldCriterion.py RUNTIME 20)
+        endif()
+    endif()
+endif()
+
+if(OGS_USE_PETSC)
+NotebookTest(NOTEBOOKFILE Mechanics/ReleaseNodalForceKirsch/mpi_parallel_run_kirsch.py RUNTIME 30)
+endif()

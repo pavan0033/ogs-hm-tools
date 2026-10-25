@@ -1,0 +1,93 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "NumLib/NumericsConfig.h"
+#include "BaseLib/Error.h"
+
+namespace MeshLib
+{
+class Mesh;
+}
+
+namespace NumLib
+{
+class LocalToGlobalIndexMap;
+template <typename>
+struct IndexValueVector;
+}  // namespace NumLib
+namespace ParameterLib
+{
+struct ParameterBase;
+}
+namespace ProcessLib
+{
+struct BoundaryConditionConfig;
+class Process;
+
+class BoundaryCondition
+{
+public:
+    //! Applies natural BCs (i.e. non-Dirichlet BCs) to the stiffness matrix
+    //! \c K and the vector \c b.
+    virtual void applyNaturalBC(const double /*t*/,
+                                std::vector<GlobalVector*> const& /*x*/,
+                                int const /*process_id*/, GlobalMatrix* /*K*/,
+                                GlobalVector& /*b*/, GlobalMatrix* /*Jac*/)
+    {
+        // By default it is assumed that the BC is not a natural BC. Therefore
+        // there is nothing to do here.
+    }
+
+    //! Writes the values of essential BCs to \c bc_values.
+    virtual void getEssentialBCValues(
+        const double /*t*/, GlobalVector const& /*x*/,
+        NumLib::IndexValueVector<GlobalIndexType>& /*bc_values*/) const
+    {
+        // By default it is assumed that the BC is not an essential BC.
+        // Therefore there is nothing to do here.
+    }
+
+    virtual void preTimestep(const double /*t*/,
+                             std::vector<GlobalVector*> const& /*x*/,
+                             int const /*process_id*/)
+    {
+        // A hook added for solution dependent dirichlet
+    }
+
+    virtual void postTimestep(const double /*t*/,
+                              std::vector<GlobalVector*> const& /*x*/,
+                              int const /*process_id*/)
+    {
+        // A hook added for solution dependent dirichlet
+    }
+
+    /// Relative controls must not compete with another essential condition.
+    virtual bool requiresExclusiveEssentialDofs() const { return false; }
+
+    /// Called only after the time-step algorithm accepts the global solution.
+    virtual void postAcceptedTimestep(double const /*t*/,
+                                      std::vector<GlobalVector*> const& /*x*/,
+                                      int const /*process_id*/)
+    {
+    }
+
+    /// Accepted-state caches; stateless boundaries have an empty payload.
+    virtual std::vector<double> checkpointState() const { return {}; }
+    virtual void validateCheckpointState(std::vector<double> const& state,
+                                         double const /*time*/) const
+    {
+        if (!state.empty()) { OGS_FATAL("Unexpected boundary checkpoint cache."); }
+    }
+    virtual void restoreCheckpointState(std::vector<double> const& state,
+                                        double const time)
+    { validateCheckpointState(state, time); }
+
+    virtual bool hasActiveSet() const { return false; }
+    virtual bool updateActiveSet(double, GlobalVector const&) { return false; }
+
+    virtual ~BoundaryCondition() = default;
+};
+
+}  // namespace ProcessLib

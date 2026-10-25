@@ -1,0 +1,81 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <vector>
+
+#include "MathLib/Point3d.h"
+
+namespace GeoLib
+{
+
+/**
+ * Calculated center and radius of a minimal bounding sphere for a given number
+ * of geometric points.
+ */
+class MinimalBoundingSphere final
+{
+public:
+    /// Point-Sphere
+    explicit MinimalBoundingSphere(
+        MathLib::Point3d const& p,
+        double radius = std::numeric_limits<double>::epsilon());
+    /// Bounding sphere using two points
+    MinimalBoundingSphere(MathLib::Point3d const& p, MathLib::Point3d const& q);
+    /// Bounding sphere using three points
+    MinimalBoundingSphere(MathLib::Point3d const& p, MathLib::Point3d const& q,
+                          MathLib::Point3d const& r);
+    /// Bounding sphere using four points
+    MinimalBoundingSphere(MathLib::Point3d const& p,
+                          MathLib::Point3d const& q,
+                          MathLib::Point3d const& r,
+                          MathLib::Point3d const& s);
+    /// Bounding sphere of n points
+    explicit MinimalBoundingSphere(
+        std::vector<MathLib::Point3d*> const& points);
+
+    /// Returns the center point of the sphere
+    MathLib::Point3d getCenter() const { return _center; }
+
+    /// Returns the radius of the sphere
+    double getRadius() const { return _radius; }
+
+    /// Returns the squared euclidean distance of a point from the sphere (for
+    /// points within the sphere distance is negative)
+    double pointDistanceSquared(MathLib::Point3d const& pnt) const;
+
+private:
+    /// Constructor using no points
+    MinimalBoundingSphere();
+
+    /**
+     * Recursive method for calculating a minimal bounding sphere for an
+     * arbitrary number of points. Note: This method will change the order of
+     * elements in the vector sphere_points. \param sphere_points The vector of
+     * points for which the smallest enclosing sphere is calculated \param
+     * start_idx Start index of the vector subrange analysed in the current
+     * recursive step \param length Length of the vector subrange analysed in
+     * the current recursive step \param n_boundary_points Number of found
+     * boundary points in the current recursive step
+     *
+     * Algorithm based the following two papers:
+     *   Emo Welzl: Smallest enclosing disks (balls and ellipsoids). New Results
+     * and New Trends in Computer Science, pp. 359--370, 1991 Bernd Gaertner:
+     * Fast and Robust Smallest Enclosing Balls. ESA99, pp. 325--338, 1999. Code
+     * based on "Smallest Enclosing Spheres" implementation by Nicolas Capens on
+     * flipcode's Developer Toolbox (www.flipcode.com)
+     */
+    static MinimalBoundingSphere recurseCalculation(
+        std::vector<MathLib::Point3d*> sphere_points,
+        std::size_t start_idx,
+        std::size_t length,
+        std::size_t n_boundary_points);
+
+    double _radius{-1};
+    MathLib::Point3d _center{{std::numeric_limits<double>::max(),
+                              std::numeric_limits<double>::max(),
+                              std::numeric_limits<double>::max()}};
+};
+
+}  // namespace GeoLib

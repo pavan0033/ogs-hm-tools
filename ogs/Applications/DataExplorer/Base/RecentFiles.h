@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+// ** INCLUDES **
+#include <QAction>
+#include <QMenu>
+#include <QObject>
+
+class QString;
+
+/**
+ * The RecentFiles class provides functionality to store information about
+ * recently used files (e.g. loaded or saved files).
+ * Example Usage:
+ * \code RecentFiles* recentFiles = new RecentFiles(this, SLOT(openRecentFile()), "recentFileList", "OpenGeoSys");
+ * connect(this, SIGNAL(fileUsed(QString)), recentFiles, SLOT(setCurrentFile(QString)));
+ * menu_File->addMenu( recentFiles->menu() ); \endcode
+ * with:
+ * \code void MainWindow::openRecentFile()
+ * {
+ *   QAction* action = qobject_cast<QAction*>(sender());
+ *   if (action)
+ *   loadFile(action->data().toString());
+ * } \endcode
+ */
+class RecentFiles : public QObject
+{
+    Q_OBJECT
+
+public:
+    /**
+     * Constructor. Example Usage:
+     * \code RecentFiles recentFiles = new RecentFiles(this, SLOT(mySlot(QString)), "recentFileList"); \endcode
+     * \param parent The parent object. Normally the QMainWindow instance
+     * \param slot A slot on parent which is called when a recent file is clicked.
+     * Use this with Qts SLOT() macro!
+     * \param settingsName The setting key
+     */
+    RecentFiles(QObject* parent, const char* slot, QString settingsName);
+    ~RecentFiles() override;
+
+    /// Returns the created menu. Add this menu to your QMainWindow menu.
+    QMenu* menu();
+
+public slots:
+    /// Should be called from the application when a file was used.
+    void setCurrentFile(const QString& filename);
+
+private:
+    /// Updates the recent files list and writes it to the settings.
+    void updateRecentFileActions();
+
+    /// Returns the filename from a full file path.
+    QString strippedName(const QString& fullFileName);
+
+    QMenu* _filesMenu;
+    QString _currentFile;
+    QString _settingsName;
+    enum { _maxFiles = 5 };
+    QAction* _fileActions[_maxFiles];
+};

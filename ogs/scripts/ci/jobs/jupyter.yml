@@ -1,0 +1,110 @@
+test linux wheel via notebooks:
+  stage: check
+  tags: [shell]
+  needs: [meta]
+  variables:
+    OGS_GROUP: ogs-local
+  parallel:
+    matrix:
+      - OGS_GROUP: ogs-local
+        UV_ARGS: ""
+      - OGS_GROUP: ogs-master
+        UV_ARGS: "--upgrade-package ogs"
+      # maintenance test upgrading all dependencies
+      - OGS_GROUP: [ogs-local, ogs-master, ogs-pypi]
+        UV_ARGS: "--upgrade"
+  rules:
+    # dont' run on tag
+    - if: $CI_COMMIT_TAG
+      when: never
+    # don't test master on master
+    - if: '$OGS_GROUP == "ogs-master" && $CI_COMMIT_BRANCH == "master"'
+      when: never
+
+    # don't test MR against pypi
+    - if: '$OGS_GROUP == "ogs-pypi" && $CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+
+    # Maintenance test manual on MR
+    - if: '$UV_ARGS == "--upgrade" && $CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+      allow_failure: true
+
+    # Upgrade jobs may fail
+    - if: '$UV_ARGS =~ /.*--upgrade.*/'
+      allow_failure: true
+
+    # ogs-local MR only if certain files changed
+    - if: '$OGS_GROUP == "ogs-local" && $CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - Tests/Data/**/*.py
+        - "**/pyproject.toml"
+        - "**/*.h"
+        - "**/*.cpp"
+
+    # ogs-master MR only if certain files changed
+    - if: '$OGS_GROUP == "ogs-master" && $CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - Tests/Data/**/*.py
+        - Tests/Data/pyproject.toml
+
+    # Run on master
+    - if: '$CI_COMMIT_BRANCH == "master"'
+  script:
+    - |
+      if [[ "$OGS_GROUP" == "ogs-pypi" ]]; then
+        git checkout $OGS_LAST_TAG
+      fi
+    - rm -rf .venv Tests/Data/.venv ../build/_skbuild  # cleanup build dirs
+    - cd Tests/Data
+    - uv run --group ${OGS_GROUP} ${UV_ARGS} pytest
+    # TODO:
+    #  - better timeout
+    #  - run in parallel
+    - |
+      if [[ "$CI_COMMIT_BRANCH" == "master" ]]; then
+        echo "Running on all .py files (master branch)..."
+        find . -type f -iname '*.py' \
+          | grep -vP '\.ci-skip|_out|\.venv|PhaseField|mtest|sen_shear|PETSc|PorePy' \
+          | xargs grep -l "jupytext_version" \
+          | xargs grep -L "ci skip" \
+          | xargs uv run --group ${OGS_GROUP} ${UV_ARGS} python Notebooks/testrunner.py --out _out
+        exit $?
+      elif [[ "$CI_PIPELINE_SOURCE" == "merge_request_event" ]]; then
+        echo "Running on changed .py files (MR)..."
+        base_ref="$CI_MERGE_REQUEST_TARGET_BRANCH_SHA"
+        changed_py_files=$(git diff --name-only "$base_ref" "$CI_COMMIT_SHA" \
+          | grep '^Tests/Data/.*\.py$' \
+          | sed 's%^Tests/Data/%%' \
+          | grep -Ev '(\.ci-skip|_out|\.venv|PhaseField|mtest|sen_shear|PETSc|PorePy)' \
+          | grep -v '(standard input)' \
+          || true)
+
+        if [[ -z "$changed_py_files" ]]; then
+          echo "No changed notebook files, skipping."
+          exit 0
+        fi
+
+        # Collect filtered files into a variable
+        files=$(echo "$changed_py_files" \
+          | xargs grep -l "jupytext_version" \
+          | xargs grep -L "ci skip" \
+          | grep -v '(standard input)' \
+          || true)
+
+        if [[ -z "$files" ]]; then
+          echo "No files left to test after filtering, skipping."
+          exit 0
+        fi
+
+        echo "Running changed notebook files:"
+        echo "$files"
+
+        uv run --group ${OGS_GROUP} ${UV_ARGS} python Notebooks/testrunner.py --out _out $files
+        exit $?
+      fi
+  artifacts:
+    when: always
+    paths:
+      - Tests/Data/_out/**/*.html
+      - Tests/Data/_out/**/*out.txt

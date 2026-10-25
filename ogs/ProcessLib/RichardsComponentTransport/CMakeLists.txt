@@ -1,0 +1,1 @@
+ogs_add_process(RichardsComponentTransport PUBLIC_LIBRARIES ChemistryLib)

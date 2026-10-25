@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <cstddef>
+#include <iosfwd>
+
+namespace FileIO
+{
+namespace GMSH
+{
+
+class GMSHLine final {
+public:
+    GMSHLine(std::size_t start_point_id, std::size_t end_point_id);
+    void write(std::ostream &os, std::size_t id) const;
+
+private:
+    std::size_t _start_pnt_id;
+    std::size_t _end_pnt_id;
+};
+
+} // end namespace GMSH
+} // end namespace FileIO

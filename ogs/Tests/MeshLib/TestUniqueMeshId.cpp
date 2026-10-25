@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <gtest/gtest.h>
+
+#include "MeshLib/Mesh.h"
+
+using namespace MeshLib;
+
+TEST(MeshLib, UniqueMeshId)
+{
+    // Create first mesh and get the current counter value.
+    Mesh m0("first", std::vector<Node*>(), std::vector<Element*>());
+    std::size_t const counter_value = m0.getID();
+
+    EXPECT_GE(counter_value, 0u);
+
+    //
+    // Test mesh counter increments.
+    //
+    auto m1 = std::make_unique<Mesh>("second", std::vector<Node*>(),
+                                     std::vector<Element*>());
+    ASSERT_EQ(counter_value + std::size_t(1), m1->getID());
+
+    Mesh m2("third", std::vector<Node*>(), std::vector<Element*>());
+    ASSERT_EQ(counter_value + std::size_t(2), m2.getID());
+
+    m1.reset();
+    ASSERT_EQ(counter_value + std::size_t(2), m2.getID());
+
+    Mesh m3("fourth", std::vector<Node*>(), std::vector<Element*>());
+    ASSERT_EQ(counter_value + std::size_t(3), m3.getID());
+
+    // Copy mesh keeps also increments the counter.
+    Mesh m4 = m0;
+    ASSERT_EQ(counter_value + std::size_t(4), m4.getID());
+
+    // Moving a mesh keeps the counter (and all other properties)
+    Mesh m5 = std::move(m0);
+    ASSERT_EQ(counter_value, m5.getID());
+    ASSERT_EQ("first", m5.getName());
+}

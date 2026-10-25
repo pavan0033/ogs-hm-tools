@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "VtkAlgorithmProperties.h"
+#include <vtkPolyDataAlgorithm.h>
+
+class vtkInformation;
+class vtkInformationVector;
+
+/// @brief Creates lines that stand on top of the image with the length
+/// of the corresponding first sub-pixel value (the grey or red value).
+/// The maximum height is 0.1 * longest image dimension.
+/// Used by VtkCompositeImageDataToCylindersFilter.
+class VtkImageDataToLinePolyDataFilter : public vtkPolyDataAlgorithm, public VtkAlgorithmProperties
+{
+public:
+    /// @brief Create new objects with New() because of VTKs reference counting.
+    static VtkImageDataToLinePolyDataFilter* New();
+
+    vtkTypeMacro(VtkImageDataToLinePolyDataFilter, vtkPolyDataAlgorithm);
+
+    /// @brief Prints information about itself.
+    void PrintSelf(ostream& os, vtkIndent indent) override;
+
+    /// @brief Sets the scaling of the length of the lines.
+    ogsUserPropertyMacro(LengthScaleFactor,double);
+
+    /// @brief Sets a user property.
+    void SetUserProperty(QString name, QVariant value) override
+    {
+        if (name.compare("LengthScaleFactor") == 0)
+            SetLengthScaleFactor(value.toDouble());
+    }
+
+    /// @brief Returns the space between two pixels.
+    vtkGetMacro(ImageSpacing,double);
+
+    VtkImageDataToLinePolyDataFilter(const VtkImageDataToLinePolyDataFilter&) =
+        delete;
+    void operator=(const VtkImageDataToLinePolyDataFilter&) = delete;
+
+protected:
+    /// @brief Constructor.
+    VtkImageDataToLinePolyDataFilter();
+
+    /// @brief Destructor.
+    ~VtkImageDataToLinePolyDataFilter() override;
+
+    /// @brief Sets input port to vtkImageData.
+    int FillInputPortInformation(int port, vtkInformation* info) override;
+
+    /// @brief Converts the image data to lines
+    int RequestData(vtkInformation* request, vtkInformationVector** inputVector,
+                    vtkInformationVector* outputVector) override;
+
+    /// @brief The spacing of the image
+    double ImageSpacing{0.0};
+};

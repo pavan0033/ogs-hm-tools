@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+#include "FemCondition.h"
+
+namespace DataHolderLib
+{
+class BoundaryCondition final : public FemCondition
+{
+public:
+    enum class ConditionType
+    {
+        NONE,
+        DIRICHLET,
+        NEUMANN,
+        ROBIN
+    };
+
+    BoundaryCondition(ProcessVariable const& process_var,
+                      std::string const& param_name, ConditionType type);
+
+    std::string const getConditionClassStr() const override
+    {
+        return "Boundary Condition";
+    }
+
+    /// Returns the type of boundary condition this is
+    ConditionType getType() const { return _type; }
+
+    /// Converts the type enum into a string
+    static ConditionType convertStringToType(std::string const& str);
+
+    /// Converts a string specifying the type into an enum
+    static std::string convertTypeToString(ConditionType type);
+
+private:
+    ConditionType _type;
+};
+
+}  // namespace DataHolderLib

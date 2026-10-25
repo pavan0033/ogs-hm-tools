@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <Eigen/Core>
+#include <memory>
+#include <utility>
+
+#include "ConstitutiveRelations/PhaseTransitionModel.h"
+#include "MaterialLib/MPL/MaterialSpatialDistributionMap.h"
+#include "MaterialLib/SolidModels/MechanicsBase.h"
+#include "ProcessLib/Common/HydroMechanics/InitialStress.h"
+
+namespace ProcessLib
+{
+namespace TH2M
+{
+/// A type helping to avoid confusion of different boolean values.
+using InitializePorosityFromMediumProperty =
+    BaseLib::StrongType<bool, struct InitializePorosityFromMediumPropertyTag>;
+
+template <int DisplacementDim>
+struct TH2MProcessData
+{
+    MeshLib::PropertyVector<int> const* const material_ids = nullptr;
+
+    MaterialPropertyLib::MaterialSpatialDistributionMap media_map;
+
+    /// The constitutive relation for the mechanical part.
+    std::map<int, std::shared_ptr<
+                      MaterialLib::Solids::MechanicsBase<DisplacementDim>>>
+        solid_materials;
+
+    std::unique_ptr<ConstitutiveRelations::PhaseTransitionModel>
+        phase_transition_model_ = nullptr;
+
+    InitialStress const initial_stress;
+
+    /// Specific body forces applied to solid and both fluid phases.
+    /// It is usually used to apply gravitational forces.
+    /// A vector of displacement dimension's length.
+    Eigen::Matrix<double, DisplacementDim, 1> const specific_body_force;
+
+    bool const apply_mass_lumping = false;
+
+    const bool use_TaylorHood_elements = false;
+
+    InitializePorosityFromMediumProperty const
+        initialize_porosity_from_medium_property;
+
+    MeshLib::PropertyVector<double>* gas_pressure_interpolated = nullptr;
+    MeshLib::PropertyVector<double>* capillary_pressure_interpolated = nullptr;
+    MeshLib::PropertyVector<double>* temperature_interpolated = nullptr;
+    MeshLib::PropertyVector<double>* liquid_pressure_interpolated = nullptr;
+
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+};
+
+}  // namespace TH2M
+}  // namespace ProcessLib

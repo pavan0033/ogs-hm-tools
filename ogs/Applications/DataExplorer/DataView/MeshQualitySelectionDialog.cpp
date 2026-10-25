@@ -1,0 +1,84 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "MeshQualitySelectionDialog.h"
+
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QSettings>
+
+#include "Base/OGSError.h"
+
+/// Constructor
+MeshQualitySelectionDialog::MeshQualitySelectionDialog(QDialog* parent)
+    : QDialog(parent), _histogram_path("")
+{
+    setupUi(this);
+    this->choiceEdges->toggle();
+}
+
+MeshQualitySelectionDialog::~MeshQualitySelectionDialog() = default;
+
+void MeshQualitySelectionDialog::on_histogramCheckBox_toggled(
+    bool is_checked) const
+{
+    histogramPathEdit->setEnabled(is_checked);
+    histogramPathButton->setEnabled(is_checked);
+}
+
+void MeshQualitySelectionDialog::on_histogramPathButton_pressed()
+{
+    QSettings settings;
+    QFileInfo fi(settings.value("lastOpenedFileDirectory").toString());
+    QString file_name =
+        QFileDialog::getSaveFileName(this, "Save histogram as", fi.baseName(),
+                                     "Text files (*.txt);;All files (* *.*)");
+    this->histogramPathEdit->setText(file_name);
+}
+
+/// Instructions if the OK-Button has been pressed.
+void MeshQualitySelectionDialog::accept()
+{
+    if (this->choiceEdges->isChecked())
+    {
+        _metric = MeshLib::MeshQualityType::EDGERATIO;
+    }
+    else if (this->choiceArea->isChecked())
+    {
+        _metric = MeshLib::MeshQualityType::ELEMENTSIZE;
+    }
+    else if (this->choiceVolume->isChecked())
+    {
+        _metric = MeshLib::MeshQualityType::SIZEDIFFERENCE;
+    }
+    else if (this->choiceAngles->isChecked())
+    {
+        _metric = MeshLib::MeshQualityType::EQUIANGLESKEW;
+    }
+    else if (this->choiceRadius->isChecked())
+    {
+        _metric = MeshLib::MeshQualityType::RADIUSEDGERATIO;
+    }
+    else
+    {
+        _metric = MeshLib::MeshQualityType::INVALID;
+    }
+
+    if (this->histogramCheckBox->isChecked())
+    {
+        _histogram_path = this->histogramPathEdit->text().toStdString();
+        if (_histogram_path.empty())
+        {
+            OGSError::box("No path for histogram file specified.");
+            return;
+        }
+    }
+
+    this->done(QDialog::Accepted);
+}
+
+/// Instructions if the Cancel-Button has been pressed.
+void MeshQualitySelectionDialog::reject()
+{
+    this->done(QDialog::Rejected);
+}

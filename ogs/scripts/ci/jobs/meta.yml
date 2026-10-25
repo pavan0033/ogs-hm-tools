@@ -1,0 +1,13 @@
+meta:
+  stage: preparation
+  image: registry.gitlab.com/gitlab-ci-utils/curl-jq:5.0.3
+  needs: []
+  variables:
+    GIT_DEPTH: 1000
+  before_script:
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+  script:
+    - bash scripts/ci/helper/meta.sh
+  artifacts:
+    reports:
+      dotenv: build.env

@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "CreateCurve.h"
+
+#include <unordered_set>
+
+#include "BaseLib/Algorithm.h"
+#include "BaseLib/ConfigTree.h"
+#include "Curve.h"
+#include "MaterialLib/MPL/VariableType.h"
+#include "MathLib/InterpolationAlgorithms/PiecewiseLinearInterpolation.h"
+
+namespace MaterialPropertyLib
+{
+std::unique_ptr<Curve> createCurve(
+    BaseLib::ConfigTree const& config,
+    std::map<std::string,
+             std::unique_ptr<MathLib::PiecewiseLinearInterpolation>> const&
+        curves)
+{
+    //! \ogs_file_param{properties__property__type}
+    config.checkConfigParameter("type", "Curve");
+
+    // Second access for storage.
+    //! \ogs_file_param{properties__property__name}
+    auto property_name = config.peekConfigParameter<std::string>("name");
+
+    DBUG("Create Curve {:s}.", property_name);
+
+    //! \ogs_file_param{properties__property__Curve__curve}
+    auto curve_name = config.getConfigParameter<std::string>("curve");
+    DBUG("Using curve '{:s}'", curve_name);
+
+    auto const& curve =
+        *BaseLib::getOrError(curves, curve_name, "Could not find curve.");
+
+    auto const independent_variable_string =
+        //! \ogs_file_param{properties__property__Curve__independent_variable}
+        config.getConfigParameter<std::string>("independent_variable");
+    DBUG("Using independent_variable '{:s}'", independent_variable_string);
+
+    static const std::unordered_set<std::string> filter_not_variables = {
+        "t", "x", "y", "z"};
+    MaterialPropertyLib::StringOrVariable independent_variable;
+    if (filter_not_variables.contains(independent_variable_string))
+    {
+        independent_variable = independent_variable_string;
+    }
+    else
+    {
+        independent_variable = MaterialPropertyLib::convertStringToVariable(
+            independent_variable_string);
+    }
+
+    return std::make_unique<Curve>(
+        std::move(property_name), independent_variable, curve);
+}
+
+}  // namespace MaterialPropertyLib

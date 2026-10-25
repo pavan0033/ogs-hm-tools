@@ -1,0 +1,443 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <tclap/CmdLine.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <memory>
+#include <range/v3/algorithm/all_of.hpp>
+#include <range/v3/algorithm/find_if.hpp>
+#include <range/v3/range/conversion.hpp>
+#include <range/v3/view/filter.hpp>
+#include <string>
+#include <vector>
+
+#include "BaseLib/Error.h"
+#include "BaseLib/Logging.h"
+#include "BaseLib/MPI.h"
+#include "BaseLib/Subdivision.h"
+#include "BaseLib/TCLAPArguments.h"
+#include "InfoLib/GitInfo.h"
+#include "MathLib/Point3d.h"
+#include "MeshLib/Elements/Element.h"
+#include "MeshLib/Elements/Point.h"
+#include "MeshLib/IO/writeMeshToFile.h"
+#include "MeshLib/Mesh.h"
+#include "MeshLib/MeshEnums.h"
+#include "MeshLib/Node.h"
+#include "MeshLib/Utils/addPropertyToMesh.h"
+#include "MeshToolsLib/MeshEditing/RemoveMeshComponents.h"
+#include "MeshToolsLib/MeshGenerators/MeshGenerator.h"
+#include "MeshToolsLib/MeshSurfaceExtraction.h"
+
+namespace
+{
+struct BoundarySide
+{
+    std::string name;
+    unsigned axis;
+    double value;
+};
+
+/// Extract and write 1D boundary point meshes (left and right endpoints).
+/// @param mesh The 1D line mesh
+/// @param origin The mesh origin point
+/// @param length The domain lengths
+/// @param base The base filename (without extension) for output
+void extract1DBoundaryMeshes(MeshLib::Mesh const& mesh,
+                             MathLib::Point3d const& origin,
+                             std::vector<double> const& length,
+                             std::string const& base)
+{
+    auto const eps = std::numeric_limits<double>::epsilon() *
+                     *std::max_element(length.begin(), length.end()) * 100;
+
+    std::array<BoundarySide, 2> const sides{
+        {{"left", 0, origin[0]}, {"right", 0, origin[0] + length[0]}}};
+
+    auto const& nodes = mesh.getNodes();
+    for (auto const& side : sides)
+    {
+        auto const it =
+            ranges::find_if(nodes, [&](auto const* n)
+                            { return std::abs((*n)[0] - side.value) <= eps; });
+
+        if (it == nodes.end())
+        {
+            continue;
+        }
+
+        auto* node = *it;
+        auto* new_node = new MeshLib::Node(*node);
+        std::vector<MeshLib::Node*> side_nodes{new_node};
+        std::vector<MeshLib::Element*> side_elements{
+            new MeshLib::Point({new_node})};
+
+        MeshLib::Mesh side_mesh(side.name, side_nodes, side_elements);
+
+        std::array<std::size_t, 1> const bulk_node_id{node->getID()};
+        MeshLib::addPropertyToMesh<std::size_t>(
+            side_mesh, MeshLib::getBulkIDString(MeshLib::MeshItemType::Node),
+            MeshLib::MeshItemType::Node, 1, std::span{bulk_node_id});
+
+        if (MeshLib::IO::writeMeshToFile(
+                side_mesh,
+                std::filesystem::path(base + "_" + side.name + ".vtu")) != 0)
+        {
+            ERR("Could not write boundary mesh '{:s}'.", side.name);
+            continue;
+        }
+        INFO("Boundary mesh '{}' written.", side.name);
+    }
+}
+
+/// Extract and write 2D/3D boundary meshes (left, right, bottom, top, and
+/// optionally front, back).
+/// @param mesh The 2D or 3D mesh
+/// @param dim The mesh dimension (2 or 3)
+/// @param origin The mesh origin point
+/// @param length The domain lengths
+/// @param base The base filename (without extension) for output
+void extract2D3DBoundaryMeshes(MeshLib::Mesh const& mesh,
+                               unsigned dim,
+                               MathLib::Point3d const& origin,
+                               std::vector<double> const& length,
+                               std::string const& base)
+{
+    auto const eps = std::numeric_limits<double>::epsilon() *
+                     *std::max_element(length.begin(), length.end()) * 100;
+
+    auto boundary_mesh =
+        MeshToolsLib::BoundaryExtraction::getBoundaryElementsAsMesh(
+            mesh, MeshLib::getBulkIDString(MeshLib::MeshItemType::Node),
+            MeshLib::getBulkIDString(MeshLib::MeshItemType::Cell),
+            MeshLib::getBulkIDString(MeshLib::MeshItemType::Face));
+
+    std::vector<BoundarySide> sides{{"left", 0, origin[0]},
+                                    {"right", 0, origin[0] + length[0]},
+                                    {"bottom", 1, origin[1]},
+                                    {"top", 1, origin[1] + length[1]}};
+
+    if (dim == 3)
+    {
+        sides.push_back({"front", 2, origin[2]});
+        sides.push_back({"back", 2, origin[2] + length[2]});
+    }
+
+    for (auto const& side : sides)
+    {
+        auto const node_on_side = [&](auto const node_id)
+        {
+            auto const* node = boundary_mesh->getNode(node_id);
+            return std::abs((*node)[side.axis] - side.value) <= eps;
+        };
+        auto const element_not_on_side = [&](auto const* elem)
+        {
+            return !ranges::all_of(elem->nodes() | MeshLib::views::ids,
+                                   node_on_side);
+        };
+        auto const remove_ids = boundary_mesh->getElements() |
+                                ranges::views::filter(element_not_on_side) |
+                                MeshLib::views::ids | ranges::to<std::vector>;
+
+        std::unique_ptr<MeshLib::Mesh> side_mesh(MeshToolsLib::removeElements(
+            *boundary_mesh, remove_ids, side.name));
+
+        if (side_mesh && side_mesh->getNumberOfElements() > 0)
+        {
+            if (MeshLib::IO::writeMeshToFile(
+                    *side_mesh,
+                    std::filesystem::path(base + "_" + side.name + ".vtu")) !=
+                0)
+            {
+                ERR("Could not write boundary mesh '{:s}'.", side.name);
+                continue;
+            }
+            INFO("Boundary mesh '{}' written: {:d} nodes, {:d} elements.",
+                 side.name, side_mesh->getNumberOfNodes(),
+                 side_mesh->getNumberOfElements());
+        }
+    }
+}
+
+}  // end namespace
+
+int main(int argc, char* argv[])
+{
+    TCLAP::CmdLine cmd(
+        "Structured mesh generator.\n"
+        "The documentation is available at "
+        "https://docs.opengeosys.org/docs/tools/meshing/"
+        "structured-mesh-generation.\n\n"
+        "OpenGeoSys-6 software, version " +
+            GitInfoLib::GitInfo::ogs_version +
+            ".\n"
+            "Copyright (c) 2012-2026, OpenGeoSys Community "
+            "(http://www.opengeosys.org)",
+        ' ', GitInfoLib::GitInfo::ogs_version);
+
+    std::vector<std::string> allowed_ele_types;
+    allowed_ele_types.emplace_back("line");
+    allowed_ele_types.emplace_back("tri");
+    allowed_ele_types.emplace_back("quad");
+    allowed_ele_types.emplace_back("hex");
+    allowed_ele_types.emplace_back("prism");
+    allowed_ele_types.emplace_back("tet");
+    allowed_ele_types.emplace_back("pyramid");
+    TCLAP::ValuesConstraint<std::string> allowedVals(allowed_ele_types);
+    TCLAP::ValueArg<std::string> eleTypeArg("e", "element-type",
+                                            "element type to be created", true,
+                                            "line", &allowedVals);
+    cmd.add(eleTypeArg);
+    TCLAP::ValueArg<std::string> mesh_out(
+        "o", "mesh-output-file",
+        "Output (.vtu). The name of the file the mesh will be written to", true,
+        "", "OUTPUT_FILE");
+    cmd.add(mesh_out);
+    TCLAP::ValueArg<double> lengthXArg("", "lx",
+                                       "length of a domain in x direction, "
+                                       "(min = 0)",
+                                       false, 10.0, "LENGTH_X");
+    cmd.add(lengthXArg);
+    TCLAP::ValueArg<double> lengthYArg("", "ly",
+                                       "length of a domain in y direction, "
+                                       "(min = 0)",
+                                       false, 10.0, "LENGTH_Y");
+    cmd.add(lengthYArg);
+    TCLAP::ValueArg<double> lengthZArg("", "lz",
+                                       "length of a domain in z direction, "
+                                       "(min = 0)",
+                                       false, 10.0, "LENGTH_Z");
+    cmd.add(lengthZArg);
+    TCLAP::ValueArg<unsigned> nsubdivXArg(
+        "", "nx",
+        "the number of subdivision in x direction, "
+        "(min = 0)",
+        false, 10, "SUBDIVISIONS_X");
+    cmd.add(nsubdivXArg);
+    TCLAP::ValueArg<unsigned> nsubdivYArg(
+        "", "ny",
+        "the number of subdivision in y direction, "
+        "(min = 0)",
+        false, 10, "SUBDIVISIONS_Y");
+    cmd.add(nsubdivYArg);
+    TCLAP::ValueArg<unsigned> nsubdivZArg(
+        "", "nz",
+        "the number of subdivision in z direction, "
+        "(min = 0)",
+        false, 10, "SUBDIVISIONS_Z");
+    cmd.add(nsubdivZArg);
+    // in case of gradual refinement
+    TCLAP::ValueArg<double> d0XArg("", "dx0",
+                                   "initial cell length in x direction, "
+                                   "(min = 0)",
+                                   false, 1, "INITIAL_X");
+    cmd.add(d0XArg);
+    TCLAP::ValueArg<double> d0YArg("", "dy0",
+                                   "initial cell length in y direction, "
+                                   "(min = 0)",
+                                   false, 1, "INITIAL_Y");
+    cmd.add(d0YArg);
+    TCLAP::ValueArg<double> d0ZArg("", "dz0",
+                                   "initial cell length in z direction, "
+                                   "(min = 0)",
+                                   false, 1, "INITIAL_Z");
+    cmd.add(d0ZArg);
+    TCLAP::ValueArg<double> dmaxXArg("", "dx-max",
+                                     "maximum cell length in x direction, "
+                                     "(min = 0)",
+                                     false, std::numeric_limits<double>::max(),
+                                     "MAX_X");
+    cmd.add(dmaxXArg);
+    TCLAP::ValueArg<double> dmaxYArg("", "dy-max",
+                                     "maximum cell length in y direction, "
+                                     "(min = 0)",
+                                     false, std::numeric_limits<double>::max(),
+                                     "MAX_Y");
+    cmd.add(dmaxYArg);
+    TCLAP::ValueArg<double> dmaxZArg("", "dz-max",
+                                     "maximum cell length in z direction, "
+                                     "(min = 0)",
+                                     false, std::numeric_limits<double>::max(),
+                                     "MAX_Z");
+    cmd.add(dmaxZArg);
+    TCLAP::ValueArg<double> multiXArg("", "mx", "multiplier in x direction",
+                                      false, 1, "MULTIPLIER_X");
+    cmd.add(multiXArg);
+    TCLAP::ValueArg<double> multiYArg("", "my", "multiplier in y direction",
+                                      false, 1, "MULTIPLIER_Y");
+    cmd.add(multiYArg);
+    TCLAP::ValueArg<double> multiZArg("", "mz", "multiplier in z direction",
+                                      false, 1, "MULTIPLIER_Z");
+    cmd.add(multiZArg);
+    TCLAP::ValueArg<double> originXArg(
+        "", "ox", "mesh origin (lower left corner) in x direction", false, 0,
+        "ORIGIN_X");
+    cmd.add(originXArg);
+    TCLAP::ValueArg<double> originYArg(
+        "", "oy", "mesh origin (lower left corner) in y direction", false, 0,
+        "ORIGIN_Y");
+    cmd.add(originYArg);
+    TCLAP::ValueArg<double> originZArg(
+        "", "oz", "mesh origin (lower left corner) in z direction", false, 0,
+        "ORIGIN_Z");
+    cmd.add(originZArg);
+    // parse arguments
+    auto log_level_arg = BaseLib::makeLogLevelArg();
+    cmd.add(log_level_arg);
+    cmd.parse(argc, argv);
+    BaseLib::MPI::Setup mpi_setup(argc, argv);
+    BaseLib::initOGSLogger(log_level_arg.getValue());
+
+    const std::string eleTypeName(eleTypeArg.getValue());
+    const MeshLib::MeshElemType eleType =
+        MeshLib::String2MeshElemType(eleTypeName);
+    const unsigned dim = MeshLib::getDimension(eleType);
+
+    bool dim_used[3] = {false};
+    for (unsigned i = 0; i < dim; i++)
+    {
+        dim_used[i] = true;
+    }
+
+    std::vector<TCLAP::ValueArg<double>*> vec_lengthArg = {
+        &lengthXArg, &lengthYArg, &lengthZArg};
+    std::vector<TCLAP::ValueArg<unsigned>*> vec_ndivArg = {
+        &nsubdivXArg, &nsubdivYArg, &nsubdivZArg};
+    std::vector<TCLAP::ValueArg<double>*> vec_d0Arg = {&d0XArg, &d0YArg,
+                                                       &d0ZArg};
+    std::vector<TCLAP::ValueArg<double>*> vec_dMaxArg = {&dmaxXArg, &dmaxYArg,
+                                                         &dmaxZArg};
+    std::vector<TCLAP::ValueArg<double>*> vec_multiArg = {
+        &multiXArg, &multiYArg, &multiZArg};
+    MathLib::Point3d const origin(
+        {originXArg.getValue(), originYArg.getValue(), originZArg.getValue()});
+
+    const bool isLengthSet =
+        std::any_of(vec_lengthArg.begin(), vec_lengthArg.end(),
+                    [&](TCLAP::ValueArg<double>* arg) { return arg->isSet(); });
+    if (!isLengthSet)
+    {
+        ERR("Missing input: Length information is not provided at all.");
+        return EXIT_FAILURE;
+    }
+    for (unsigned i = 0; i < 3; i++)
+    {
+        if (dim_used[i] && !vec_lengthArg[i]->isSet())
+        {
+            ERR("Missing input: Length for dimension [{:d}] is required but "
+                "missing.",
+                i);
+            return EXIT_FAILURE;
+        }
+    }
+
+    std::vector<double> length(dim);
+    std::vector<unsigned> n_subdivision(dim);
+    std::vector<double> vec_dx(dim);
+    for (unsigned i = 0; i < dim; i++)
+    {
+        length[i] = vec_lengthArg[i]->getValue();
+        n_subdivision[i] = vec_ndivArg[i]->getValue();
+        vec_dx[i] = length[i] / n_subdivision[i];
+    }
+
+    std::vector<std::unique_ptr<BaseLib::ISubdivision>> vec_div;
+    vec_div.reserve(dim);
+    for (unsigned i = 0; i < dim; i++)
+    {
+        if (vec_multiArg[i]->isSet())
+        {
+            if (vec_ndivArg[i]->isSet())
+            {
+                // number of partitions in direction is specified
+                if (vec_d0Arg[i]->isSet())
+                {
+                    OGS_FATAL(
+                        "Specifying all of --m?, --d?0 and --n? for coordinate "
+                        "'?' is not supported.");
+                }
+                vec_div.emplace_back(new BaseLib::GradualSubdivisionFixedNum(
+                    length[i], vec_ndivArg[i]->getValue(),
+                    vec_multiArg[i]->getValue()));
+            }
+            else
+            {
+                vec_div.emplace_back(new BaseLib::GradualSubdivision(
+                    length[i], vec_d0Arg[i]->getValue(),
+                    vec_dMaxArg[i]->getValue(), vec_multiArg[i]->getValue()));
+            }
+        }
+        else
+        {
+            vec_div.emplace_back(
+                new BaseLib::UniformSubdivision(length[i], n_subdivision[i]));
+        }
+    }
+
+    // generate a mesh
+    std::unique_ptr<MeshLib::Mesh> mesh;
+    switch (eleType)
+    {
+        case MeshLib::MeshElemType::LINE:
+            mesh.reset(MeshToolsLib::MeshGenerator::generateLineMesh(
+                *vec_div[0], origin));
+            break;
+        case MeshLib::MeshElemType::TRIANGLE:
+            mesh.reset(MeshToolsLib::MeshGenerator::generateRegularTriMesh(
+                *vec_div[0], *vec_div[1], origin));
+            break;
+        case MeshLib::MeshElemType::QUAD:
+            mesh.reset(MeshToolsLib::MeshGenerator::generateRegularQuadMesh(
+                *vec_div[0], *vec_div[1], origin));
+            break;
+        case MeshLib::MeshElemType::HEXAHEDRON:
+            mesh.reset(MeshToolsLib::MeshGenerator::generateRegularHexMesh(
+                *vec_div[0], *vec_div[1], *vec_div[2], origin));
+            break;
+        case MeshLib::MeshElemType::PRISM:
+            mesh.reset(MeshToolsLib::MeshGenerator::generateRegularPrismMesh(
+                length[0], length[1], length[2], n_subdivision[0],
+                n_subdivision[1], n_subdivision[2], origin));
+            break;
+        case MeshLib::MeshElemType::TETRAHEDRON:
+            mesh.reset(MeshToolsLib::MeshGenerator::generateRegularTetMesh(
+                *vec_div[0], *vec_div[1], *vec_div[2], origin));
+            break;
+        case MeshLib::MeshElemType::PYRAMID:
+            mesh.reset(MeshToolsLib::MeshGenerator::generateRegularPyramidMesh(
+                *vec_div[0], *vec_div[1], *vec_div[2], origin));
+            break;
+        default:
+            ERR("Given element type is not supported.");
+            break;
+    }
+
+    if (!mesh)
+    {
+        return EXIT_FAILURE;
+    }
+
+    INFO("Mesh created: {:d} nodes, {:d} elements.", mesh->getNumberOfNodes(),
+         mesh->getNumberOfElements());
+
+    auto const out_path = std::filesystem::path(mesh_out.getValue());
+    if (MeshLib::IO::writeMeshToFile(*mesh, out_path) != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    auto const base = (out_path.parent_path() / out_path.stem()).string();
+
+    if (dim == 1)
+    {
+        extract1DBoundaryMeshes(*mesh, origin, length, base);
+    }
+    else if (dim >= 2)
+    {
+        extract2D3DBoundaryMeshes(*mesh, dim, origin, length, base);
+    }
+
+    return EXIT_SUCCESS;
+}

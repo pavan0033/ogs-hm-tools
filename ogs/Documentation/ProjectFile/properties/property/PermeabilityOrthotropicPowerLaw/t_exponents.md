@@ -1,0 +1,1 @@
+\copydoc MaterialPropertyLib::PermeabilityOrthotropicPowerLaw::lambda_

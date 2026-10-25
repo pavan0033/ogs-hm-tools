@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <cstddef>
+#include <iosfwd>
+
+#include "MeshEnums.h"
+
+#pragma once
+
+namespace MeshLib
+{
+
+/// Spatial location description.
+///
+/// The spatial location is given by a mesh by its \c mesh_id, item's type (face,
+/// cell, etc. see MeshItemType), and item's number by its \c item_id.
+struct Location
+{
+    std::size_t          mesh_id;
+    MeshItemType         item_type;
+    std::size_t          item_id;
+
+    Location(std::size_t meshid, MeshItemType itemtype, std::size_t itemid)
+    : mesh_id(meshid), item_type(itemtype), item_id(itemid){}
+};
+
+/// Lexicographic order of Location.
+inline
+bool operator<(const Location& left, const Location& right)
+{
+    if (left.mesh_id != right.mesh_id)
+    {
+        return left.mesh_id < right.mesh_id;
+    }
+    if (left.item_type != right.item_type)
+    {
+        return left.item_type < right.item_type;
+    }
+    return left.item_id < right.item_id;
+}
+
+
+std::ostream& operator<<(std::ostream& os, Location const& l);
+
+}   // namespace MeshLib

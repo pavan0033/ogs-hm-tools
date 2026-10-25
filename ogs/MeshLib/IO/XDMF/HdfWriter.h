@@ -1,0 +1,81 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+#include <hdf5.h>
+
+#include <filesystem>
+#include <map>
+#include <memory>
+#include <vector>
+
+#include "HdfData.h"
+
+namespace MeshLib::IO
+{
+using HDFAttributes = std::vector<HdfData>;
+struct MeshHdfData
+{
+    HDFAttributes constant_attributes;
+    HDFAttributes variable_attributes;
+    std::string name;
+};
+
+class HdfWriter final
+{
+public:
+    /**
+     * \brief Write file with geometry and topology data. The data
+     * itself is held by a structure outside of this class. The writer assumes
+     * the data holder to not change during writing
+     * @param meshes meta data of meshes to be written
+     * @param initial_step number of the step (temporal collection), usually 0,
+     * greater 0 with continuation of simulation
+     * @param initial_time start time; usually 0, but may differ (e.g. for
+     * restart).
+     * @param filepath absolute or relative filepath to the hdf5 file
+     * @param use_compression if true gzip compression is enabled
+     * @param is_file_manager True if process (in parallel execution) is
+     * @param n_files Number of output files
+     * @param static_file If true, only the constant_attributes of each mesh
+     * are written, the file is flushed and closed inside the constructor, and
+     * subsequent calls to writeStep() are no-ops. Use this for data that does
+     * not change over time (e.g. mesh geometry/topology).
+     */
+    HdfWriter(std::vector<MeshHdfData> const& meshes,
+              unsigned long long initial_step,
+              double initial_time,
+              std::filesystem::path const& filepath,
+              bool use_compression,
+              bool is_file_manager,
+              unsigned int n_files,
+              bool static_file);
+    /**
+     * \brief Writes attributes. The data
+     * itself is hold by a structure outside of this class. The writer assumes
+     * the data holder to not change during writing and HdfData given to
+     * constructor to be still valid
+     * @param time time_value of step to be written to temporal collection
+     */
+    void writeStep(double time);
+    ~HdfWriter();
+
+private:
+    // internal data holder
+    struct HdfMesh;
+
+    /// Closes the meshes group, flushes and closes the HDF5 file, logging a
+    /// diagnostic on any failure. Shared by the static-file constructor path
+    /// and the destructor.
+    void closeMeshesGroupAndFile();
+
+    std::filesystem::path const _hdf5_filepath;
+    hid_t const _file;
+    hid_t const _meshes_group;
+    std::vector<std::unique_ptr<HdfMesh>> _hdf_meshes;
+    std::vector<double> _step_times;
+    bool const _use_compression;
+    bool const _is_file_manager;
+    bool const _static_file;
+};
+}  // namespace MeshLib::IO

@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "BoundaryCondition.h"
+#include "MeshLib/MeshSubset.h"
+
+namespace ProcessLib
+{
+class GenericNaturalBoundaryConditionLocalAssemblerInterface;
+
+template <typename BoundaryConditionData,
+          template <typename /* shp fct */, int /* global dim */>
+          class LocalAssemblerImplementation>
+class GenericNaturalBoundaryCondition final : public BoundaryCondition
+{
+public:
+    /// Create a boundary condition process from given config,
+    /// DOF-table, and a mesh subset for a given variable and its component.
+    /// A local DOF-table, a subset of the given one, is constructed.
+    template <typename Data>
+    GenericNaturalBoundaryCondition(
+        unsigned const integration_order, unsigned const shapefunction_order,
+        NumLib::LocalToGlobalIndexMap const& dof_table_bulk,
+        int const variable_id, int const component_id,
+        unsigned const global_dim, MeshLib::Mesh const& bc_mesh, Data&& data);
+
+    /// Calls local assemblers which calculate their contributions to the global
+    /// matrix and the right-hand-side.
+    void applyNaturalBC(const double t, std::vector<GlobalVector*> const& x,
+                        int const process_id, GlobalMatrix* K, GlobalVector& b,
+                        GlobalMatrix* Jac) override;
+
+private:
+    /// Data used in the assembly of the specific boundary condition.
+    BoundaryConditionData _data;
+
+    /// A lower-dimensional mesh on which the boundary condition is defined.
+    MeshLib::Mesh const& _bc_mesh;
+
+    /// Local dof table, a subset of the global one restricted to the
+    /// participating number of _elements of the boundary condition.
+    std::unique_ptr<NumLib::LocalToGlobalIndexMap> _dof_table_boundary;
+
+    /// Local assemblers for each element of number of _elements.
+    std::vector<
+        std::unique_ptr<GenericNaturalBoundaryConditionLocalAssemblerInterface>>
+        _local_assemblers;
+};
+
+}  // namespace ProcessLib
+
+#include "GenericNaturalBoundaryCondition-impl.h"

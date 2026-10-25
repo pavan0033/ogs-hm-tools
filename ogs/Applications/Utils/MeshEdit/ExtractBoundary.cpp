@@ -1,0 +1,100 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <tclap/CmdLine.h>
+
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "BaseLib/FileTools.h"
+#include "BaseLib/Logging.h"
+#include "BaseLib/MPI.h"
+#include "BaseLib/StringTools.h"
+#include "BaseLib/TCLAPArguments.h"
+#include "InfoLib/GitInfo.h"
+#include "MeshLib/Elements/Element.h"
+#include "MeshLib/IO/VtkIO/VtuInterface.h"
+#include "MeshLib/IO/readMeshFromFile.h"
+#include "MeshLib/IO/writeMeshToFile.h"
+#include "MeshLib/Mesh.h"
+#include "MeshLib/Node.h"
+#include "MeshToolsLib/MeshSurfaceExtraction.h"
+
+int main(int argc, char* argv[])
+{
+    TCLAP::CmdLine cmd(
+        "Tool extracts the boundary of the given mesh. The documentation is "
+        "available at "
+        "https://docs.opengeosys.org/docs/tools/meshing-submeshes/"
+        "extract-boundary.\n\n"
+        "OpenGeoSys-6 software, version " +
+            GitInfoLib::GitInfo::ogs_version +
+            ".\n"
+            "Copyright (c) 2012-2026, OpenGeoSys Community "
+            "(http://www.opengeosys.org)",
+        ' ', GitInfoLib::GitInfo::ogs_version);
+    TCLAP::ValueArg<std::string> mesh_in(
+        "i", "mesh-input-file",
+        "Input (.vtu). The name of the file containing the input mesh", true,
+        "", "INPUT_FILE");
+    cmd.add(mesh_in);
+    TCLAP::ValueArg<std::string> mesh_out(
+        "o", "mesh-output-file",
+        "Output (.vtu). The name of the file the surface mesh should be "
+        "written to",
+        false, "", "OUTPUT_FILE");
+    cmd.add(mesh_out);
+
+    TCLAP::SwitchArg use_ascii_arg("", "ascii-output",
+                                   "If the switch is set use ascii instead of "
+                                   "binary format for data in the vtu output.",
+                                   false);
+    cmd.add(use_ascii_arg);
+
+    auto log_level_arg = BaseLib::makeLogLevelArg();
+    cmd.add(log_level_arg);
+    cmd.parse(argc, argv);
+
+    BaseLib::MPI::Setup mpi_setup(argc, argv);
+    BaseLib::initOGSLogger(log_level_arg.getValue());
+
+    std::unique_ptr<MeshLib::Mesh const> mesh(MeshLib::IO::readMeshFromFile(
+        mesh_in.getValue(), true /* compute_element_neighbors */));
+
+    if (!mesh)
+    {
+        return EXIT_FAILURE;
+    }
+
+    INFO("Mesh read: {:d} nodes, {:d} elements.", mesh->getNumberOfNodes(),
+         mesh->getNumberOfElements());
+
+    // extract surface
+    std::unique_ptr<MeshLib::Mesh> surface_mesh(
+        MeshToolsLib::BoundaryExtraction::getBoundaryElementsAsMesh(
+            *mesh,
+            MeshLib::getBulkIDString(MeshLib::MeshItemType::Node),
+            MeshLib::getBulkIDString(MeshLib::MeshItemType::Cell),
+            MeshLib::getBulkIDString(MeshLib::MeshItemType::Face)));
+
+    INFO("Created surface mesh: {:d} nodes, {:d} elements.",
+         surface_mesh->getNumberOfNodes(), surface_mesh->getNumberOfElements());
+
+    std::string out_fname(mesh_out.getValue());
+    if (out_fname.empty())
+    {
+        out_fname = BaseLib::dropFileExtension(mesh_in.getValue()) + "_sfc.vtu";
+    }
+
+    auto const data_mode =
+        use_ascii_arg.getValue() ? vtkXMLWriter::Ascii : vtkXMLWriter::Binary;
+    auto const use_compression = true;
+    if (MeshLib::IO::writeMeshToFile(*surface_mesh, out_fname, {},
+                                     use_compression, data_mode) != 0)
+    {
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}

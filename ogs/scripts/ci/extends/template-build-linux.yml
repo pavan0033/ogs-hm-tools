@@ -1,0 +1,177 @@
+.template-build-linux:
+  stage: build
+  retry:
+    max: 2
+    when: runner_system_failure
+
+  script:
+    - |
+      if [[ -n "$OGSTOOLS_REF" ]]; then
+        cd Tests/Data
+        sed -i "s|\"ogstools==.*\"|\"$OGSTOOLS_REF\"|" pyproject.toml
+        uv lock
+        cd -
+      fi
+    - build_dir_prefix=${CMAKE_PRESET_BUILD_DIR_PREFIX:-}
+    - export CMAKE_PRESET_BUILD_DIR_PREFIX=$build_dir_prefix
+    - build_dir_full=../build/${build_dir_prefix}${CMAKE_PRESET}
+    - |
+      case "$CMAKE_PRESET" in
+        clang-*|sanitizer|ci-iwyu) export CC=clang CXX=clang++ ;;
+        release-petsc*|debug-petsc*|coverage-petsc|ci-no-unity) export CC=mpicc CXX=mpic++ ;;
+      esac
+    - log_file=$build_dir_full/make.txt
+    - rm -rf $build_dir_full
+    - mkdir -p $build_dir_full build
+    - if [[ "$OSTYPE" == "darwin"* ]] ; then readlink_cmd=greadlink; else readlink_cmd=readlink; fi
+    - ln -s `$readlink_cmd -f $build_dir_full` build/${CMAKE_PRESET}-${CI_JOB_NAME_SLUG}-${CI_JOB_ID}
+    - |
+      if [[ $BUILD_CTEST_LARGE_ON_MASTER && ( "${CI_COMMIT_BRANCH}" == "${CI_DEFAULT_BRANCH}" || -n "${CI_COMMIT_TAG}" ) ]]; then
+        export BUILD_CTEST_LARGE=true
+        echo "Enabling large ctests."
+      fi
+    - |
+      if [[ "$CI_MERGE_REQUEST_LABELS" =~ .*coverage\ only.* ]]; then
+        # On coverage only pipeline also build with cpp coverage.
+        # This covers cpp functionality called by Python.
+        CMAKE_ARGS="${CMAKE_ARGS} -DOGS_COVERAGE=ON"
+      fi
+      if [[ "${CI_COMMIT_BRANCH}" == "${CI_DEFAULT_BRANCH}" ]]; then
+        # Run non OpenMP variants as well
+        CMAKE_ARGS="${CMAKE_ARGS} -DOGS_ENABLE_NON_OMP_TEST_VARIANTS=ON"
+      fi
+    - echo "########################" + `date` + "########################"
+    - |
+      build_with_ctest=false
+      ctest_group="Experimental"
+      if [ "${CI_COMMIT_BRANCH}" = "${CI_DEFAULT_BRANCH}" ]; then
+        ctest_group="master"
+      fi
+      if [ "$BUILD_CTEST" = true ] && [[ -z "$TARGETS" ]] && \
+         [[ "$CI_PIPELINE_SOURCE" != "pipeline" ]] && \
+         [[ ! "$CI_MERGE_REQUEST_LABELS" =~ .*unit_tests.* ]]; then
+        build_with_ctest=true
+      fi
+
+      if [ "$build_with_ctest" = true ]; then
+        export CMAKE_ARGS
+        export CTEST_BINARY_DIRECTORY="$build_dir_full"
+        export CTEST_GROUP="$ctest_group"
+        if [ "${CI_PIPELINE_SOURCE}" = "pipeline" ]; then export CTEST_SUBMIT=false; else export CTEST_SUBMIT=true; fi
+        export CTEST_DASHBOARD_PHASE=configure
+        ctest -S scripts/ci/ctest-dashboard.cmake -VV > >(tee "$log_file")
+      else
+        cmake --preset=$CMAKE_PRESET -B "$build_dir_full" --log-level=VERBOSE -Wno-dev $CMAKE_ARGS
+      fi
+    # Activate .venv via .envrc
+    - test -f $build_dir_full/.venv/bin/activate && source $build_dir_full/.envrc
+    - |
+
+      if [[ -z "$TARGETS" ]]; then
+
+        if [ "$build_with_ctest" = true ]; then
+          export CTEST_DASHBOARD_PHASE=build
+          ctest -S scripts/ci/ctest-dashboard.cmake -VV > >(tee -a "$log_file")
+        fi
+
+        if [[ ! -z "$ADDITIONAL_TARGETS_PRE" ]] && [ "$build_with_ctest" = false ]; then
+
+          echo "########################" + `date` + "########################"
+          $BUILD_CMD_PREFIX cmake --build --preset=$CMAKE_PRESET --target ${ADDITIONAL_TARGETS_PRE} > >(tee -a $log_file)
+
+        fi
+
+        if [ "$BUILD_PACKAGE" = true ]; then
+          build_package="--target package"
+        fi
+
+        if [ "$build_with_ctest" = false ]; then
+          echo "########################" + `date` + "########################"
+          $BUILD_CMD_PREFIX cmake --build --preset=$CMAKE_PRESET ${build_package} > >(tee -a $log_file)
+        fi
+
+        echo "########################" + `date` + "########################"
+        if [ "$BUILD_TESTS" = true ]; then $BUILD_CMD_PREFIX cmake --build --preset=$CMAKE_PRESET --target tests ; fi
+
+        if [ "$BUILD_CTEST" = true ]; then
+          ctest_timeout=75
+          preset_postfix=""
+          if [[ "$CI_MERGE_REQUEST_LABELS" =~ .*ci_large.* && "$CI_JOB_NAME" =~ build.[linux|mac].* && ! "$CI_JOB_NAME" =~ .*sanitizer ]]; then
+            export BUILD_CTEST_LARGE=true
+          fi
+          if [ "$BUILD_CTEST_LARGE" = true ]; then
+            ctest_timeout=90
+            preset_postfix="-large"
+          fi
+
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            alias date=gdate
+          fi
+
+          ctest_preset="${CTEST_PRESET:-${CMAKE_PRESET}${preset_postfix}}"
+          export CTEST_PRESET="$ctest_preset"
+          if [[ -n "$CTEST_ARGS" ]]; then
+            ctest_timeout=120 # Explicit selections historically use the large budget.
+          fi
+
+          if [[ ! -z "$CTEST_TIMEOUT" ]]; then
+            ctest_timeout="$CTEST_TIMEOUT"
+          fi
+          export CTEST_TIMEOUT="$ctest_timeout"
+
+          # Don't submit on multi-project pipelines, e.g. triggered from
+          # ogstools, because they run only a subset of benchmarks.
+          if [ "${CI_PIPELINE_SOURCE}" = "pipeline" ]; then export CTEST_SUBMIT=false; else export CTEST_SUBMIT=true; fi
+
+          if [[ "$CI_MERGE_REQUEST_LABELS" =~ .*unit_tests.* ]]; then
+            echo "Skipping ctests because of unit_tests-label."
+          else
+            echo "########################" + `date` + "########################"
+            export CTEST_DASHBOARD_PHASE=test
+            echo "ctest preset: ${CTEST_PRESET}; explicit arguments: ${CTEST_ARGS}"
+            ctest -S scripts/ci/ctest-dashboard.cmake -VV
+          fi
+        fi
+
+        if [[ ! -z "$ADDITIONAL_TARGETS_POST" ]]; then
+
+          echo "########################" + `date` + "########################"
+          $BUILD_CMD_PREFIX cmake --build --preset=$CMAKE_PRESET --target ${ADDITIONAL_TARGETS_POST} > >(tee -a $log_file)
+
+        fi
+
+      else
+
+        echo "########################" + `date` + "########################"
+        $BUILD_CMD_PREFIX cmake --build --preset=$CMAKE_PRESET --target ${TARGETS} > >(tee $log_file)
+
+      fi
+      echo "########################" + `date` + "########################"
+    - |
+      if [[ $CHECK_WARNINGS == true ]]; then
+        warnings=$(grep -i warning "$log_file" | grep -v -e 'was built for newer macOS version' \
+                                                         -e 'WARNING: no license files found' \
+                                                         -e 'WARNING: multiple license files found' \
+                                                         -e 'means the weak symbol cannot be overridden at runtime' \
+                                                         -e '[0-9]\+ Compiler warnings' \
+                                                         -e '\[CTest: warning matched\]' \
+                                                         -e 'lto-wrapper: warning:' \
+                                                         -e 'ld: warning:' \
+                                                         -e "warning: 'has_denorm' is deprecated" \
+                                                         -e 'dlmalloc_ext_2_8_6\.c:[0-9:]\+: warning: iteration [0-9]\+ invokes undefined behavior' \
+                                                         -e '1 warning generated' \
+                                                         -e 'CMake.*Warning' \
+                                                         -e 'set the policy and suppress this warning' \
+                                                         -e 'Use -Wno-dev to suppress it' \
+                                                         -e 'Eigen/src/Core/Fill\.h:126' \
+                                                         -e 'Eigen/src/Core/functors/BinaryFunctors\.h:80' \
+                                                         ) || true
+        if [[ -n $warnings ]]; then
+          printf 'There were compiler warnings:\n\n'
+          printf '%s\n' "$warnings"
+          exit 1
+        fi
+      fi
+
+      # Check for clean git status
+      [ -z "$(git status --porcelain)" ] || (echo "Repo is dirty!" && git status --short && exit 1)

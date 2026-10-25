@@ -1,0 +1,575 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "_binary_dir",
+      "hidden": true,
+      "binaryDir": "${sourceParentDir}/build/$penv{CMAKE_PRESET_BUILD_DIR_PREFIX}${presetName}"
+    },
+    {
+      "name": "_release",
+      "hidden": true,
+      "inherits": "_binary_dir",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CONFIGURATION_TYPES": "Release"
+      }
+    },
+    {
+      "name": "_debug",
+      "hidden": true,
+      "inherits": "_binary_dir",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CONFIGURATION_TYPES": "Debug"
+      }
+    },
+    {
+      "name": "_ninja",
+      "hidden": true,
+      "generator": "Ninja"
+    },
+    {
+      "name": "_msvc",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "_gui",
+      "hidden": true,
+      "cacheVariables": {
+        "OGS_BUILD_CLI": "OFF",
+        "OGS_BUILD_GUI": "ON",
+        "OGS_USE_NETCDF": "ON"
+      }
+    },
+    {
+      "name": "_petsc",
+      "hidden": true,
+      "cacheVariables": {
+        "OGS_USE_PETSC": "ON"
+      },
+      "environment": {
+        "CC": "mpicc",
+        "CXX": "mpic++"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "_clang",
+      "hidden": true,
+      "environment": {
+        "CC": "clang",
+        "CXX": "clang++"
+      }
+    },
+    {
+      "name": "_clang-mfront-analysis",
+      "hidden": true,
+      "inherits": "_clang",
+      "cacheVariables": {
+        "OGS_USE_MFRONT": "ON",
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy;--config-file=${sourceDir}/.clang-tidy;--header-filter=${sourceDir}/.*"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": [
+        "_ninja",
+        "_release"
+      ]
+    },
+    {
+      "name": "debug",
+      "inherits": [
+        "_ninja",
+        "_debug"
+      ]
+    },
+    {
+      "name": "release-gui",
+      "inherits": [
+        "release",
+        "_gui"
+      ]
+    },
+    {
+      "name": "debug-gui",
+      "inherits": [
+        "debug",
+        "_gui"
+      ]
+    },
+    {
+      "name": "release-petsc",
+      "inherits": [
+        "release",
+        "_petsc"
+      ]
+    },
+    {
+      "name": "debug-petsc",
+      "inherits": [
+        "debug",
+        "_petsc"
+      ]
+    },
+    {
+      "name": "_petsc_full",
+      "hidden": true,
+      "environment": {
+       "OGS_PETSC_CONFIG_OPTIONS": "--download-superlu;--download-superlu_dist;--download-scalapack;--download-mumps;--with-cc=$env{CC};--with-cxx=$env{CXX};--with-fc=mpif90"
+      }
+    },
+    {
+      "name": "release-petsc-full",
+      "inherits": [
+        "release",
+        "_petsc",
+        "_petsc_full"
+      ]
+    },
+    {
+      "name": "release-petsc-all",
+      "inherits": [
+        "release",
+        "_petsc",
+        "_all"
+      ]
+    },
+    {
+      "name": "release-petsc-full-all",
+      "inherits": [
+        "release",
+        "_petsc",
+        "_petsc_full",
+        "_all"
+      ]
+    },
+    {
+      "name": "debug-petsc-full",
+      "inherits": [
+        "debug",
+        "_petsc",
+        "_petsc_full"
+      ]
+    },
+    {
+      "name": "msvc-release",
+      "inherits": [
+        "_msvc",
+        "_release"
+      ]
+    },
+    {
+      "name": "msvc-debug",
+      "inherits": [
+        "_msvc",
+        "_debug"
+      ]
+    },
+    {
+      "name": "msvc-release-gui",
+      "inherits": [
+        "msvc-release",
+        "_gui"
+      ]
+    },
+    {
+      "name": "msvc-debug-gui",
+      "inherits": [
+        "msvc-debug",
+        "_gui"
+      ]
+    },
+    {
+      "name": "_all",
+      "hidden": true,
+      "cacheVariables": {
+        "OGS_USE_MFRONT": "ON",
+        "OGS_USE_PIP": "ON"
+      }
+    },
+    {
+      "name": "release-all",
+      "inherits": [
+        "release",
+        "_all"
+      ]
+    },
+    {
+      "name": "clang-release",
+      "inherits": [
+        "_clang-mfront-analysis",
+        "release"
+      ]
+    },
+    {
+      "name": "clang-debug",
+      "inherits": [
+        "_clang-mfront-analysis",
+        "debug"
+      ]
+    },
+    {
+      "name": "debug-all",
+      "inherits": [
+        "debug",
+        "_all"
+      ]
+    },
+    {
+      "name": "coverage",
+      "inherits": [
+        "debug"
+      ],
+      "cacheVariables": {
+        "OGS_COVERAGE": "ON",
+        "OGS_CTEST_MAX_RUNTIME": "101",
+        "OGS_USE_MFRONT": "ON",
+        "OGS_ENABLE_NON_OMP_TEST_VARIANTS": "ON",
+        "OGS_CTEST_LABEL_EXCLUDE": "-LE omp"
+      }
+    },
+    {
+      "name": "coverage-petsc",
+      "inherits": [
+        "coverage",
+        "_petsc"
+      ]
+    },
+    {
+      "name": "ci-no-unity",
+      "inherits": [
+        "_ninja",
+        "_release",
+        "_petsc",
+        "_petsc_full",
+        "_all"
+      ],
+      "cacheVariables": {
+        "OGS_USE_UNITY_BUILDS": "OFF"
+      }
+    },
+    {
+      "name": "ci-iwyu",
+      "inherits": [
+        "_clang",
+        "_release",
+        "_all"
+      ],
+      "cacheVariables": {
+        "OGS_INCLUDE_WHAT_YOU_USE": "ON",
+        "OGS_USE_UNITY_BUILDS": "OFF"
+      }
+    },
+    {
+      "name": "wheel",
+      "inherits": "release",
+      "cacheVariables": {
+        "HDF5_USE_STATIC_LIBRARIES": "ON",
+        "OGS_BUILD_HDF5": "ON",
+        "OGS_BUILD_WHEEL": "ON",
+        "OGS_INSTALL_DEPENDENCIES": "OFF",
+        "OGS_USE_PIP": "OFF",
+        "OGS_USE_MFRONT": "ON"
+      }
+    },
+    {
+      "name": "sanitizer",
+      "inherits": [
+        "_clang",
+        "debug-all"
+      ],
+      "cacheVariables": {
+        "OGS_EIGEN_DYNAMIC_SHAPE_MATRICES": "OFF",
+        "ENABLE_ASAN": "ON",
+        "ENABLE_UBSAN": "ON",
+        "ENABLE_LSAN": "ON",
+        "OGS_BUILD_TFEL": "ON",
+        "OGS_BUILD_VTK": "ON",
+        "OGS_BUILD_HDF5": "ON"
+      },
+      "environment": {
+        "UBSAN_OPTIONS": "print_stacktrace=1",
+        "LSAN_OPTIONS": "suppressions=${sourceDir}/scripts/test/leak_sanitizer.suppressions",
+        "CXXFLAGS": "-O3 -fno-var-tracking"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "_win",
+      "hidden": true,
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release-gui",
+      "configurePreset": "release-gui"
+    },
+    {
+      "name": "debug-gui",
+      "configurePreset": "debug-gui"
+    },
+    {
+      "name": "release-petsc",
+      "configurePreset": "release-petsc"
+    },
+    {
+      "name": "debug-petsc",
+      "configurePreset": "debug-petsc"
+    },
+    {
+      "name": "release-petsc-full",
+      "configurePreset": "release-petsc-full"
+    },
+    {
+      "name": "release-petsc-all",
+      "configurePreset": "release-petsc-all"
+    },
+    {
+      "name": "release-petsc-full-all",
+      "configurePreset": "release-petsc-full-all"
+    },
+    {
+      "name": "debug-petsc-full",
+      "configurePreset": "debug-petsc-full"
+    },
+    {
+      "name": "msvc-release",
+      "inherits": "_win",
+      "configurePreset": "msvc-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "msvc-debug",
+      "inherits": "_win",
+      "configurePreset": "msvc-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "msvc-release-gui",
+      "inherits": "_win",
+      "configurePreset": "msvc-release-gui",
+      "configuration": "Release",
+      "targets": [
+        "DataExplorer"
+      ]
+    },
+    {
+      "name": "msvc-debug-gui",
+      "inherits": "_win",
+      "configurePreset": "msvc-debug-gui",
+      "configuration": "Debug",
+      "targets": [
+        "DataExplorer"
+      ]
+    },
+    {
+      "name": "release-all",
+      "configurePreset": "release-all"
+    },
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release"
+    },
+    {
+      "name": "clang-debug",
+      "configurePreset": "clang-debug"
+    },
+    {
+      "name": "debug-all",
+      "configurePreset": "debug-all"
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage"
+    },
+    {
+      "name": "coverage-petsc",
+      "configurePreset": "coverage-petsc"
+    },
+    {
+      "name": "ci-no-unity",
+      "configurePreset": "ci-no-unity"
+    },
+    {
+      "name": "ci-iwyu",
+      "configurePreset": "ci-iwyu"
+    },
+    {
+      "name": "wheel",
+      "configurePreset": "wheel"
+    },
+    {
+      "name": "sanitizer",
+      "configurePreset": "sanitizer"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "filter": {
+        "include": {
+          "label": "default"
+        }
+      },
+      "execution": {
+        "repeat": {
+          "mode": "until-pass",
+          "count": 2
+        }
+      }
+    },
+    {
+      "name": "release-large",
+      "inherits": [
+        "release"
+      ],
+      "filter": {
+        "include": {
+          "label": "default|large"
+        }
+      }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "inherits": [
+        "release"
+      ]
+    },
+    {
+      "name": "release-all-large",
+      "configurePreset": "release-all",
+      "inherits": [
+        "release-large"
+      ]
+    },
+    {
+      "name": "release-petsc",
+      "configurePreset": "release-petsc",
+      "inherits": [
+        "release"
+      ]
+    },
+    {
+      "name": "release-petsc-large",
+      "configurePreset": "release-petsc",
+      "inherits": [
+        "release-large"
+      ]
+    },
+    {
+      "name": "release-petsc-all",
+      "configurePreset": "release-petsc-all",
+      "inherits": [
+        "release"
+      ]
+    },
+    {
+      "name": "release-petsc-all-large",
+      "configurePreset": "release-petsc-all",
+      "inherits": [
+        "release-large"
+      ]
+    },
+    {
+      "name": "release-petsc-full-all",
+      "configurePreset": "release-petsc-full-all",
+      "inherits": [
+        "release"
+      ]
+    },
+    {
+      "name": "msvc-release",
+      "configurePreset": "msvc-release",
+      "configuration": "Release",
+      "inherits": [
+        "release"
+      ]
+    },
+    {
+      "name": "msvc-release-large",
+      "configurePreset": "msvc-release",
+      "configuration": "Release",
+      "inherits": [
+        "release-large"
+      ]
+    },
+    {
+      "name": "release-gui",
+      "configurePreset": "release-gui",
+      "inherits": [
+        "release"
+      ]
+    },
+    {
+      "name": "release-all",
+      "configurePreset": "release-all",
+      "inherits": [
+        "release"
+      ]
+    },
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release",
+      "inherits": [
+        "release"
+      ]
+    },
+    {
+      "name": "clang-release-large",
+      "configurePreset": "clang-release",
+      "inherits": [
+        "release-large"
+      ]
+    },
+    {
+      "name": "clang-debug",
+      "configurePreset": "clang-debug",
+      "inherits": [
+        "release"
+      ]
+    },
+    {
+      "name": "sanitizer",
+      "configurePreset": "sanitizer",
+      "inherits": [
+        "release"
+      ],
+      "filter": {
+        "exclude": {
+          "name": "nb-"
+        }
+      }
+    }
+  ]
+}

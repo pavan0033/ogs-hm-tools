@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "ui_MergeGeometries.h"
+#include <QDialog>
+
+class QStringListModel;
+
+namespace GeoLib
+{
+class GEOObjects;
+}
+
+/**
+ * \brief A dialog window for setting preferences for GMSH
+ */
+class MergeGeometriesDialog : public QDialog, private Ui_MergeGeometries
+{
+    Q_OBJECT
+
+public:
+    explicit MergeGeometriesDialog(GeoLib::GEOObjects& geoObjects,
+                                   QDialog* parent = nullptr);
+    ~MergeGeometriesDialog() override;
+
+    /// Returns a vector of selected geometries
+    std::vector<std::string> getSelectedGeometries() const;
+
+    /// Returns the name of the new merged geometry
+    std::string getGeometryName() const;
+
+private:
+    GeoLib::GEOObjects& _geo_objects;
+    QStringListModel* _allGeo;
+    QStringListModel* _selGeo;
+
+private slots:
+    void on_selectGeoButton_pressed();
+    void on_deselectGeoButton_pressed();
+
+    /// Instructions if the OK-Button has been pressed.
+    void accept() override;
+
+    /// Instructions if the Cancel-Button has been pressed.
+    void reject() override;
+};

@@ -1,0 +1,177 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "SpecificHeatCapacityWithLatentHeat.h"
+
+#include "MaterialLib/MPL/Medium.h"
+
+namespace MaterialPropertyLib
+{
+SpecificHeatCapacityWithLatentHeat::SpecificHeatCapacityWithLatentHeat(
+    std::string name, double const l)
+    : l_(l)
+{
+    name_ = std::move(name);
+}
+
+void SpecificHeatCapacityWithLatentHeat::checkScale() const
+{
+    if (!std::holds_alternative<Medium*>(scale_))
+    {
+        OGS_FATAL(
+            "The property 'SpecificHeatCapacityWithLatentHeat' is "
+            "implemented on the 'medium' scale only.");
+    }
+}
+
+void SpecificHeatCapacityWithLatentHeat::setProperties(
+    std::vector<std::unique_ptr<Phase>> const& phases)
+{
+    // run over phases, identify them and get properties
+    for (auto const& phase : phases)
+    {
+        if (phase == nullptr)
+        {
+            OGS_FATAL(
+                "One of the required phases (AqueousLiquid/FrozenLiquid/Solid) "
+                "does not exist!");
+        }
+
+        auto const& density_property =
+            phase->property(MaterialPropertyLib::PropertyType::density);
+        auto const& specific_heat_capacity_property = phase->property(
+            MaterialPropertyLib::PropertyType::specific_heat_capacity);
+
+        if (phase->phaseName == PhaseName::AqueousLiquid)
+        {
+            densities_.liquid = &density_property;
+            spec_heat_capacities_.liquid = &specific_heat_capacity_property;
+        }
+        else if (phase->phaseName == PhaseName::FrozenLiquid)
+        {
+            densities_.frozen = &density_property;
+            spec_heat_capacities_.frozen = &specific_heat_capacity_property;
+        }
+        else if (phase->phaseName == PhaseName::Solid)
+        {
+            densities_.porous = &density_property;
+            spec_heat_capacities_.porous = &specific_heat_capacity_property;
+        }
+    }
+}
+
+double SpecificHeatCapacityWithLatentHeat::effectiveVolumetricHeatCapacity(
+    VariableArray const& variable_array,
+    ParameterLib::SpatialPosition const& pos, double const t,
+    double const dt) const
+{
+    auto const& medium = *std::get<Medium*>(scale_);
+    auto const& porosity_property = medium[PropertyType::porosity];
+    auto const& frozen_liquid_saturation_property =
+        medium[PropertyType::frozen_liquid_saturation];
+
+    auto const phi =
+        std::get<double>(porosity_property.value(variable_array, pos, t, dt));
+    auto const S_fr = std::get<double>(
+        frozen_liquid_saturation_property.value(variable_array, pos, t, dt));
+    auto const phi_li = phi * (1.0 - S_fr);
+    auto const phi_fr = phi * S_fr;
+    auto const phi_po = 1 - phi;
+
+    auto const rho_li =
+        std::get<double>(densities_.liquid->value(variable_array, pos, t, dt));
+    auto const rho_fr =
+        std::get<double>(densities_.frozen->value(variable_array, pos, t, dt));
+    auto const rho_po =
+        std::get<double>(densities_.porous->value(variable_array, pos, t, dt));
+
+    auto const c_li = std::get<double>(
+        spec_heat_capacities_.liquid->value(variable_array, pos, t, dt));
+    auto const c_fr = std::get<double>(
+        spec_heat_capacities_.frozen->value(variable_array, pos, t, dt));
+    auto const c_po = std::get<double>(
+        spec_heat_capacities_.porous->value(variable_array, pos, t, dt));
+
+    // rule of mixtures for resulting volumetric heat capacity
+    // (mass fraction average of specific heat capacities!)
+    return phi_li * rho_li * c_li + phi_fr * rho_fr * c_fr +
+           phi_po * rho_po * c_po;
+}
+
+PropertyDataType SpecificHeatCapacityWithLatentHeat::value(
+    VariableArray const& variable_array,
+    ParameterLib::SpatialPosition const& pos, double const t,
+    double const dt) const
+{
+    auto const& medium = *std::get<Medium*>(scale_);
+    auto const& effective_density_property = medium[PropertyType::density];
+    auto const& porosity_property = medium[PropertyType::porosity];
+    auto const& frozen_liquid_saturation_property =
+        medium[PropertyType::frozen_liquid_saturation];
+
+    auto const rho_eff = effective_density_property.template value<double>(
+        variable_array, pos, t, dt);
+    auto const rho_fr =
+        std::get<double>(densities_.frozen->value(variable_array, pos, t, dt));
+    auto const dS_fr_dT =
+        frozen_liquid_saturation_property.template dValue<double>(
+            variable_array, Variable::temperature, pos, t, dt);
+
+    auto const Cvol =
+        effectiveVolumetricHeatCapacity(variable_array, pos, t, dt);
+    auto const phi =
+        std::get<double>(porosity_property.value(variable_array, pos, t, dt));
+    auto const Lvol = l_ * rho_fr * phi;
+    auto const Cvol_app = Cvol - Lvol * dS_fr_dT;
+    // divide volumetric quantity by density in order to obtain specific value
+    return Cvol_app / rho_eff;
+}
+
+PropertyDataType SpecificHeatCapacityWithLatentHeat::dValue(
+    VariableArray const& variable_array, Variable const variable,
+    ParameterLib::SpatialPosition const& pos, double const t,
+    double const dt) const
+{
+    (void)variable;
+    assert((variable == Variable::temperature) &&
+           "SpecificHeatCapacityWithLatentHeat::dvalue is implemented for "
+           "derivatives with respect to temperature only.");
+
+    auto const& medium = *std::get<Medium*>(scale_);
+    auto const& effective_density_property = medium[PropertyType::density];
+    auto const& porosity_property = medium[PropertyType::porosity];
+    auto const& frozen_liquid_saturation_property =
+        medium[PropertyType::frozen_liquid_saturation];
+
+    auto const rho_eff = effective_density_property.template value<double>(
+        variable_array, pos, t, dt);
+    auto const rho_li =
+        std::get<double>(densities_.liquid->value(variable_array, pos, t, dt));
+    auto const rho_fr =
+        std::get<double>(densities_.frozen->value(variable_array, pos, t, dt));
+    auto const c_li = std::get<double>(
+        spec_heat_capacities_.liquid->value(variable_array, pos, t, dt));
+    auto const c_fr = std::get<double>(
+        spec_heat_capacities_.frozen->value(variable_array, pos, t, dt));
+    auto const drho_dT = effective_density_property.template dValue<double>(
+        variable_array, Variable::temperature, pos, t, dt);
+    auto const dS_fr_dT =
+        frozen_liquid_saturation_property.template dValue<double>(
+            variable_array, Variable::temperature, pos, t, dt);
+    auto const d2S_fr_dT2 =
+        frozen_liquid_saturation_property.template d2Value<double>(
+            variable_array, Variable::temperature, Variable::temperature, pos,
+            t, dt);
+    auto const phi =
+        std::get<double>(porosity_property.value(variable_array, pos, t, dt));
+    auto const Cvol =
+        effectiveVolumetricHeatCapacity(variable_array, pos, t, dt);
+    // TODO: avoid duplicate code, call value()?
+    auto const C_app = (Cvol - l_ * rho_fr * phi * dS_fr_dT) / rho_eff;
+    auto const dCvol_dS_fr = phi * (rho_fr * c_fr - rho_li * c_li);
+    auto const dCvol_app_dT =
+        dCvol_dS_fr * dS_fr_dT - l_ * rho_fr * phi * d2S_fr_dT2;
+
+    return (dCvol_app_dT - drho_dT * C_app) / rho_eff;
+}
+}  // namespace MaterialPropertyLib

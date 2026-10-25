@@ -1,0 +1,15 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "InfoLib/GitInfo.h"
+
+namespace GitInfoLib
+{
+
+namespace GitInfo
+{
+const std::string OGS_VERSION = "OGS_VERSION";
+const std::string git_version_sha1_short("@GIT_SHA1_SHORT@");
+const std::string ogs_version("@OGS_VERSION@");
+}  // namespace GitInfo
+}  // namespace GitInfoLib

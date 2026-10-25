@@ -1,0 +1,69 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "ProcessLib/ConstitutiveRelations/StrainData.h"
+#include "ProcessLib/ConstitutiveRelations/StressData.h"
+#include "ProcessLib/ThermoRichardsMechanics/ConstitutiveCommon/Biot.h"
+#include "ProcessLib/ThermoRichardsMechanics/ConstitutiveCommon/BishopsData.h"
+#include "ProcessLib/ThermoRichardsMechanics/ConstitutiveCommon/CapillaryPressureData.h"
+#include "ProcessLib/ThermoRichardsMechanics/ConstitutiveCommon/EquivalentPlasticStrainData.h"
+#include "ProcessLib/ThermoRichardsMechanics/ConstitutiveCommon/MaterialState.h"
+#include "ProcessLib/ThermoRichardsMechanics/ConstitutiveCommon/SaturationData.h"
+#include "ProcessLib/ThermoRichardsMechanics/ConstitutiveCommon/SolidMechanicsDataStateless.h"
+#include "ProcessLib/ThermoRichardsMechanics/ConstitutiveCommon/TemperatureData.h"
+#include "ProcessLib/ThermoRichardsMechanics/ConstitutiveCommon/TotalStressData.h"
+#include "TraitsBase.h"
+
+namespace ProcessLib::ThermoRichardsMechanics
+{
+namespace ConstitutiveStressSaturation_StrainPressureTemperature
+{
+template <int DisplacementDim>
+struct SolidMechanicsModel
+{
+    explicit SolidMechanicsModel(
+        SolidConstitutiveRelation<DisplacementDim> const& solid_material)
+        : solid_material_(solid_material),
+          tangent_operator_blocks_view_{
+              solid_material.createTangentOperatorBlocksView()}
+    {
+    }
+
+    void eval(const SpaceTimeData& x_t,
+              TemperatureData<DisplacementDim> const& T_data,
+              CapillaryPressureData<DisplacementDim> const& p_cap_data,
+              StrainData<DisplacementDim> const& eps_data,
+              PrevState<StrainData<DisplacementDim>> const& eps_prev_data,
+              MaterialStateData<DisplacementDim>& mat_state,
+              PrevState<TotalStressData<DisplacementDim>> const&
+                  total_stress_data_prev,
+              TotalStressData<DisplacementDim>& total_stress_data,
+              EquivalentPlasticStrainData& equiv_plast_strain_data,
+              SolidMechanicsDataStateless<DisplacementDim>& current_stateless,
+              PrevState<SaturationData> const& S_L_prev_data,
+              SaturationData& S_L_data, SaturationDataDeriv& dS_L_data) const;
+
+    static SolidMechanicsModel create(
+        SolidConstitutiveRelation<DisplacementDim> const& solid_material)
+    {
+        return SolidMechanicsModel{solid_material};
+    }
+
+private:
+    SolidConstitutiveRelation<DisplacementDim> const& solid_material_;
+
+    MSM::OGSMFrontTangentOperatorBlocksView<
+        DisplacementDim,
+        MSM::ForcesGradsCombinations<
+            boost::mp11::mp_list<MSM::Strain, MSM::LiquidPressure>,
+            boost::mp11::mp_list<MSM::Stress, MSM::Saturation>,
+            boost::mp11::mp_list<MSM::Temperature>>::type>
+        tangent_operator_blocks_view_;
+};
+
+extern template struct SolidMechanicsModel<2>;
+extern template struct SolidMechanicsModel<3>;
+}  // namespace ConstitutiveStressSaturation_StrainPressureTemperature
+}  // namespace ProcessLib::ThermoRichardsMechanics

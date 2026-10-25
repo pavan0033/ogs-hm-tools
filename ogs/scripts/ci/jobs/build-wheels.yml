@@ -1,0 +1,79 @@
+.wheels_template: &wheels_template
+  stage: build
+  variables:
+    GIT_DEPTH: 1000
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+    - if: $CI_COMMIT_TAG
+    - if: $CI_MERGE_REQUEST_LABELS =~ /.*ci::wheels only.*/
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+      allow_failure: true
+  script:
+    - uvx cibuildwheel
+  artifacts:
+    paths:
+      - wheelhouse/
+
+build wheels linux:
+  tags: [envinf, shell, fast]
+  variables:
+    CPM_SOURCE_CACHE: /host/cibuildwheel_cache/cpm
+    CCACHE_DIR: /host/cibuildwheel_cache/ccache
+    CCACHE_MAXSIZE: 15G
+  <<: *wheels_template
+
+build wheels mac:
+  tags: [mac, arm64]
+  <<: *wheels_template
+
+build wheels win:
+  tags: [windows]
+  extends:
+    - .vs-environment
+  timeout: 4h
+  <<: *wheels_template
+
+publish wheels:
+  stage: release
+  needs: ["build wheels linux", "build wheels mac", "build wheels win"]
+  tags: [envinf, shell]
+  variables:
+    GIT_DEPTH: 1000
+  rules:
+    - if: $CI_COMMIT_TAG
+      variables:
+        PYPI_REPO: --repository pypi
+        PYPI_USER: __token__
+        PYPI_PW: "${PYPI_TOKEN}"
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      variables:
+        PYPI_REPO: --repository-url ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi
+        PYPI_USER: gitlab-ci-token
+        PYPI_PW: "${CI_JOB_TOKEN}"
+        SETUPTOOLS_SCM_LOCAL_SCHEME: no-local-version
+    - when: never
+  script:
+    - uvx --from build pyproject-build --sdist --outdir wheelhouse
+    - >
+      uvx twine upload
+      ${PYPI_REPO}
+      --username ${PYPI_USER} --password ${PYPI_PW}
+      wheelhouse/*
+
+publish wheels to pypi (dev):
+  stage: release
+  needs: ["build wheels linux", "build wheels mac", "build wheels win"]
+  tags: [envinf, shell]
+  variables:
+    GIT_DEPTH: 1000
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true
+  script:
+    - uvx --from build pyproject-build --sdist --outdir wheelhouse
+    - >
+      uvx twine upload --repository pypi
+      --username __token__ --password ${PYPI_TOKEN}
+      wheelhouse/*

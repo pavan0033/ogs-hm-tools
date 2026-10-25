@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "CreateAqueousSolution.h"
+
+#include "AqueousSolution.h"
+#include "BaseLib/ConfigTree.h"
+#include "ChemistryLib/Common/CreateChargeBalance.h"
+#include "CreateSolutionComponent.h"
+#include "MeshLib/Mesh.h"
+#include "MeshLib/Utils/getOrCreateMeshProperty.h"
+
+namespace ChemistryLib
+{
+namespace PhreeqcIOData
+{
+std::unique_ptr<AqueousSolution> createAqueousSolution(
+    BaseLib::ConfigTree const& config, MeshLib::Mesh& mesh)
+{
+    //! \ogs_file_attr{prj__chemical_system__solution__fixing_pe}
+    auto const fixing_pe = config.getConfigAttribute<bool>("fixing_pe", false);
+
+    //! \ogs_file_param{prj__chemical_system__solution__temperature}
+    auto const temperature = config.getConfigParameter<double>("temperature");
+
+    //! \ogs_file_param{prj__chemical_system__solution__pressure}
+    auto const pressure = config.getConfigParameter<double>("pressure");
+
+    //! \ogs_file_param{prj__chemical_system__solution__pe}
+    auto const pe0 = config.getConfigParameter<double>("pe");
+
+    auto pe = MeshLib::getOrCreateMeshProperty<double>(
+        mesh, "pe", MeshLib::MeshItemType::IntegrationPoint, 1);
+
+    auto components = createSolutionComponents(config);
+
+    auto charge_balance = createChargeBalance(config);
+
+    return std::make_unique<AqueousSolution>(fixing_pe, temperature, pressure,
+                                             pe, pe0, std::move(components),
+                                             charge_balance);
+}
+}  // namespace PhreeqcIOData
+}  // namespace ChemistryLib

@@ -1,0 +1,14 @@
+.rules-master-manual:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+    - when: manual
+      allow_failure: true
+
+.rules-manual:
+  rules:
+    - when: manual
+      allow_failure: true
+
+.rules-master:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'

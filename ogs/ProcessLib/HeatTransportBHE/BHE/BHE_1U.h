@@ -1,0 +1,176 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <Eigen/Core>
+#include <optional>
+
+#include "BHECommon.h"
+#include "BHECommonUType.h"
+#include "BaseLib/Error.h"
+#include "FlowAndTemperatureControl.h"
+#include "PipeConfigurationUType.h"
+
+namespace ParameterLib
+{
+class SpatialPosition;
+}
+
+namespace ProcessLib
+{
+namespace HeatTransportBHE
+{
+namespace BHE
+{
+/**
+ * The BHE_1U class is the realization of 1U type of Borehole Heat Exchanger.
+ * In this class, the pipe heat capacity, pipe heat conduction, pipe advection
+ * vectors are initialized according to the geometry of 1U type of BHE.
+ * For 1U type of BHE, 4 primary unknowns are assigned on the 1D BHE elements.
+ * They are the temperature in inflow pipe T_in, temperature in outflow pipe
+ * T_out temperature of the two grout zones surrounding the inflow and outflow
+ * pipe T_g1 and T_g2. These primary variables are solved according to heat
+ * convection and conduction equations on the pipes and also in the grout zones.
+ * The interaction of the 1U type of BHE and the surrounding soil is regulated
+ * through the thermal resistance values, which are calculated specifically
+ * during the initialization of the class.
+ */
+class BHE_1U final : public BHECommonUType
+{
+public:
+    BHE_1U(BoreholeGeometry const& borehole,
+           RefrigerantProperties const& refrigerant,
+           GroutParameters const& grout,
+           FlowAndTemperatureControl const& flowAndTemperatureControl,
+           PipeConfigurationUType const& pipes,
+           bool const use_python_bcs);
+
+    static constexpr int number_of_unknowns = 4;
+    static constexpr int number_of_grout_zones = 2;
+    static constexpr int number_of_flow_legs = 2;
+
+    /// Signed fluid velocity per flow leg. Positive = flow along
+    /// +elem_direction; negative = against it.  Leg ordering matches the
+    /// BHE unknowns: { i1 (down), o1 (up) }.
+    std::array<double, number_of_flow_legs> flowLegs() const
+    {
+        return {+flow_velocity, -flow_velocity};
+    }
+
+    std::array<double, number_of_unknowns> pipeHeatCapacities() const;
+
+    std::array<double, number_of_unknowns> pipeHeatConductions() const;
+
+    std::array<Eigen::Vector3d, number_of_unknowns> pipeAdvectionVectors(
+        Eigen::Vector3d const& elem_direction) const;
+
+    /// Return the full vector of thermal resistances for the element at
+    /// `pos`, computed once using the cached Nusselt number.  Intended to
+    /// be called once per element by the assembler so that the resistance
+    /// computation is not repeated per unknown and per integration point.
+    std::vector<double> thermalResistances(
+        ParameterLib::SpatialPosition const& pos) const;
+
+    template <int NPoints,
+              typename SingleUnknownMatrixType,
+              typename RMatrixType,
+              typename RPiSMatrixType,
+              typename RSMatrixType>
+    static void assembleRMatrices(
+        int const idx_bhe_unknowns,
+        Eigen::MatrixBase<SingleUnknownMatrixType> const& matBHE_loc_R,
+        Eigen::MatrixBase<RMatrixType>& R_matrix,
+        Eigen::MatrixBase<RPiSMatrixType>& R_pi_s_matrix,
+        Eigen::MatrixBase<RSMatrixType>& R_s_matrix)
+    {
+        switch (idx_bhe_unknowns)
+        {
+            case 0:  // PHI_fig
+                R_matrix.block(0, 2 * NPoints, NPoints, NPoints) +=
+                    -1.0 * matBHE_loc_R;
+                R_matrix.block(2 * NPoints, 0, NPoints, NPoints) +=
+                    -1.0 * matBHE_loc_R;
+
+                R_matrix.block(0, 0, NPoints, NPoints) +=
+                    1.0 * matBHE_loc_R;  // K_i1
+                R_matrix.block(2 * NPoints, 2 * NPoints, NPoints, NPoints) +=
+                    1.0 * matBHE_loc_R;  // K_ig
+                return;
+            case 1:  // PHI_fog
+                R_matrix.block(NPoints, 3 * NPoints, NPoints, NPoints) +=
+                    -1.0 * matBHE_loc_R;
+                R_matrix.block(3 * NPoints, NPoints, NPoints, NPoints) +=
+                    -1.0 * matBHE_loc_R;
+
+                R_matrix.block(NPoints, NPoints, NPoints, NPoints) +=
+                    1.0 * matBHE_loc_R;  // K_o1
+                R_matrix.block(3 * NPoints, 3 * NPoints, NPoints, NPoints) +=
+                    1.0 * matBHE_loc_R;  // K_og
+                return;
+            case 2:  // PHI_gg
+                R_matrix.block(2 * NPoints, 3 * NPoints, NPoints, NPoints) +=
+                    -1.0 * matBHE_loc_R;
+                R_matrix.block(3 * NPoints, 2 * NPoints, NPoints, NPoints) +=
+                    -1.0 * matBHE_loc_R;
+
+                R_matrix.block(2 * NPoints, 2 * NPoints, NPoints, NPoints) +=
+                    1.0 * matBHE_loc_R;  // K_ig  // notice we only have
+                                         // 1 PHI_gg term here.
+                R_matrix.block(3 * NPoints, 3 * NPoints, NPoints, NPoints) +=
+                    1.0 * matBHE_loc_R;  // K_og  // see Diersch 2013 FEFLOW
+                                         // book page 954 Table M.2
+                return;
+            case 3:  // PHI_gs
+                R_s_matrix.template block<NPoints, NPoints>(0, 0).noalias() +=
+                    1.0 * matBHE_loc_R;
+
+                R_pi_s_matrix.block(2 * NPoints, 0, NPoints, NPoints) +=
+                    -1.0 * matBHE_loc_R;
+                R_pi_s_matrix.block(3 * NPoints, 0, NPoints, NPoints) +=
+                    -1.0 * matBHE_loc_R;
+                R_matrix.block(2 * NPoints, 2 * NPoints, NPoints, NPoints) +=
+                    1.0 * matBHE_loc_R;  // K_ig
+                R_matrix.block(3 * NPoints, 3 * NPoints, NPoints, NPoints) +=
+                    1.0 * matBHE_loc_R;  // K_og
+                return;
+            default:
+                OGS_FATAL(
+                    "BHE_1U::assembleRMatrices: unknown index {:d} "
+                    "out of range.",
+                    idx_bhe_unknowns);
+        }
+    }
+
+    /// Return the inflow temperature for the boundary condition.
+    double updateFlowRateAndTemperature(double T_out, double current_time);
+
+    static constexpr std::pair<int, int> inflow_outflow_bc_component_ids[] = {
+        {0, 1}};
+
+    static std::array<std::pair<std::size_t /*node_id*/, int /*component*/>, 2>
+    getBHEInflowDirichletBCNodesAndComponents(
+        std::size_t const top_node_id,
+        std::size_t const /*bottom_node_id*/,
+        int const in_component_id);
+    static std::optional<
+        std::array<std::pair<std::size_t /*node_id*/, int /*component*/>, 2>>
+    getBHEBottomDirichletBCNodesAndComponents(std::size_t const bottom_node_id,
+                                              int const in_component_id,
+                                              int const out_component_id);
+
+public:
+    std::array<double, number_of_unknowns> crossSectionAreas(
+        ParameterLib::SpatialPosition const& pos) const;
+
+    void updateHeatTransferCoefficients(double const flow_rate);
+
+private:
+    double cached_nu_ = 0.0;
+
+    std::vector<double> calcThermalResistances(
+        double const Nu, ParameterLib::SpatialPosition const& pos) const;
+};
+}  // namespace BHE
+}  // namespace HeatTransportBHE
+}  // namespace ProcessLib

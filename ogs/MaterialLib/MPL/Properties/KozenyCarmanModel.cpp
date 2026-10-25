@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "KozenyCarmanModel.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace MaterialPropertyLib
+{
+PropertyDataType KozenyCarmanModel::value(
+    MaterialPropertyLib::VariableArray const& variable_array,
+    ParameterLib::SpatialPosition const& pos, double const t,
+    double const /*dt*/) const
+{
+    double const phi = variable_array.porosity;
+    auto const& k0 = _k0(t, pos);
+
+    std::vector<double> k;
+    k.reserve(k0.size());
+    std::transform(k0.cbegin(), k0.cend(), std::back_inserter(k),
+                   [&](auto const& k_component)
+                   {
+                       return k_component *
+                              std::pow((1 - _phi0(t, pos)[0]) / (1 - phi), 2) *
+                              std::pow(phi / _phi0(t, pos)[0], 3);
+                   });
+
+    return fromVector(k);
+}
+
+}  // namespace MaterialPropertyLib

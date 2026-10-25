@@ -1,0 +1,83 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "EdgeReturn.h"
+#include "Element.h"
+#include "PyramidRule.h"
+
+namespace MeshLib
+{
+
+/**
+ * This class represents a 3d pyramid element with 5 nodes.
+ * The following sketch shows the node and edge numbering.
+ * \anchor Pyramid5NodeAndEdgeNumbering
+ * \code
+ *
+ *               4
+ *             //|\
+ *            // | \
+ *          7//  |  \6
+ *          //   |5  \
+ *         //    |    \
+ *        3/.... |.....2
+ *       ./      |  2 /
+ *      ./4      |   /
+ *    3./        |  /1
+ *    ./         | /
+ *   ./          |/
+ *  0------------1
+ *        0
+ * \endcode
+
+ */
+class PyramidRule5 : public PyramidRule
+{
+public:
+    /// Constant: The number of all nodes for this element
+    static const unsigned n_all_nodes = 5u;
+
+    /// Constant: The FEM type of the element
+    static const CellType cell_type = CellType::PYRAMID5;
+
+    /// Constant: Local node index table for faces
+    constexpr static const unsigned face_nodes[5][4] = {
+        {0, 1, 4, 99},  // Face 0
+        {1, 2, 4, 99},  // Face 1
+        {2, 3, 4, 99},  // Face 2
+        {3, 0, 4, 99},  // Face 3
+        {0, 3, 2, 1}    // Face 4
+    };
+
+    /// Constant: Local node index table for edge
+    constexpr static const unsigned edge_nodes[8][2] = {
+        {0, 1},  // Edge 0
+        {1, 2},  // Edge 1
+        {2, 3},  // Edge 2
+        {0, 3},  // Edge 3
+        {0, 4},  // Edge 4
+        {1, 4},  // Edge 5
+        {2, 4},  // Edge 6
+        {3, 4}   // Edge 7
+    };
+
+    /// Constant: Table for the number of nodes for each face
+    static const unsigned n_face_nodes[5];
+
+    /// Returns the i-th edge of the element.
+    using EdgeReturn = MeshLib::LinearEdgeReturn;
+
+    /// Returns the i-th face of the element.
+    static const Element* getFace(const Element* e, unsigned i);
+
+    /// Returns the ID of a face given an array of nodes.
+    static unsigned identifyFace(Node const* const* element_nodes,
+                                 Node const* nodes[3])
+    {
+        return CellRule::identifyFace<PyramidRule5>(element_nodes, nodes);
+    }
+}; /* class */
+
+}  // namespace MeshLib

@@ -1,0 +1,1 @@
+The 'dimension' tag has been removed in the merge-request !4766. The dimension is now taken from the main mesh and the tag must be removed. There is a python script in the merge-request description for automatic conversion.

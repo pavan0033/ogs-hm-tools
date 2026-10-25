@@ -1,0 +1,67 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <tclap/CmdLine.h>
+
+#include <memory>
+#include <string>
+
+#include "BaseLib/Logging.h"
+#include "BaseLib/MPI.h"
+#include "BaseLib/TCLAPArguments.h"
+#include "InfoLib/GitInfo.h"
+#include "MeshLib/IO/readMeshFromFile.h"
+#include "MeshLib/IO/writeMeshToFile.h"
+#include "MeshLib/Mesh.h"
+
+int main(int argc, char* argv[])
+{
+    TCLAP::CmdLine cmd(
+        "Converts OGS mesh into VTK mesh.\n\n"
+        "OpenGeoSys-6 software, version " +
+            GitInfoLib::GitInfo::ogs_version +
+            ".\n"
+            "Copyright (c) 2012-2026, OpenGeoSys Community "
+            "(http://www.opengeosys.org)",
+        ' ', GitInfoLib::GitInfo::ogs_version);
+    TCLAP::ValueArg<std::string> mesh_in(
+        "i", "mesh-input-file",
+        "Input (.msh). The name of the file containing the input mesh", true,
+        "", "INPUT_FILE");
+    cmd.add(mesh_in);
+    TCLAP::ValueArg<std::string> mesh_out(
+        "o", "mesh-output-file",
+        "Output (.vtk), The name of the file the mesh will be written to", true,
+        "", "OUTPUT_FILE");
+    cmd.add(mesh_out);
+    auto log_level_arg = BaseLib::makeLogLevelArg();
+    cmd.add(log_level_arg);
+    TCLAP::SwitchArg use_ascii_arg(
+        "", "ascii_output",
+        "Write VTU output in ASCII file. Due to possible rounding the ascii "
+        "output could result in lower accuracy");
+    cmd.add(use_ascii_arg);
+    cmd.parse(argc, argv);
+
+    BaseLib::MPI::Setup mpi_setup(argc, argv);
+    BaseLib::initOGSLogger(log_level_arg.getValue());
+
+    std::unique_ptr<MeshLib::Mesh const> mesh(
+        MeshLib::IO::readMeshFromFile(mesh_in.getValue()));
+    if (!mesh)
+    {
+        return EXIT_FAILURE;
+    }
+    INFO("Mesh read: {:d} nodes, {:d} elements.", mesh->getNumberOfNodes(),
+         mesh->getNumberOfElements());
+
+    auto const data_mode =
+        use_ascii_arg.getValue() ? vtkXMLWriter::Ascii : vtkXMLWriter::Binary;
+    auto const use_compression = true;
+    if (MeshLib::IO::writeMeshToFile(*mesh, mesh_out.getValue(), {},
+                                     use_compression, data_mode) != 0)
+    {
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}

@@ -1,0 +1,321 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <gtest/gtest.h>
+
+#include <boost/property_tree/xml_parser.hpp>
+#include <fstream>
+#include <memory>
+#include <typeinfo>
+
+#include "BaseLib/Logging.h"
+#include "CreateTestLinearSolver.h"
+#include "InfoLib/TestInfo.h"
+#include "MathLib/LinAlg/LinAlg.h"
+#include "NumLib/NumericsConfig.h"
+#include "NumLib/ODESolver/ConvergenceCriterionDeltaX.h"
+#include "NumLib/ODESolver/FixedDampingStrategy.h"
+#include "ODEs.h"
+#include "Tests/TestTools.h"
+#include "TimeLoopSingleODE.h"
+
+namespace TestODEInt
+{
+struct Solution
+{
+    std::vector<double> ts;
+    std::vector<GlobalVector> solutions;
+};
+
+template <NumLib::NonlinearSolverTag NLTag>
+class TestOutput
+{
+public:
+    using TimeDisc = NumLib::TimeDiscretization;
+    using NLSolver = NumLib::NonlinearSolver<NLTag>;
+
+    template <class ODE>
+    Solution run_test(ODE& ode, TimeDisc& timeDisc,
+                      const unsigned num_timesteps)
+    {
+        using ODE_ = ODE;
+        using ODET = ODETraits<ODE>;
+
+        Solution sol;
+
+        const int process_id = 0;
+        NumLib::TimeDiscretizedODESystem<ODE_::ODETag, NLTag> ode_sys(
+            process_id, ode, timeDisc);
+
+        auto linear_solver = createLinearSolver();
+        auto conv_crit = std::make_unique<NumLib::ConvergenceCriterionDeltaX>(
+            _tol, std::nullopt, MathLib::VecNormType::NORM2);
+        std::unique_ptr<NLSolver> nonlinear_solver;
+        if constexpr (NLTag == NumLib::NonlinearSolverTag::Newton)
+        {
+            nonlinear_solver = std::make_unique<NLSolver>(
+                *linear_solver, _maxiter,
+                std::make_unique<NumLib::FixedDampingStrategy>(1.0));
+        }
+        else
+        {
+            nonlinear_solver = std::make_unique<NLSolver>(
+                *linear_solver, _maxiter, /*anderson_depth=*/0,
+                /*damping=*/1.0);
+        }
+
+        NumLib::TimeLoopSingleODE<NLTag> loop(ode_sys, std::move(linear_solver),
+                                              std::move(nonlinear_solver),
+                                              std::move(conv_crit));
+
+        const double t0 = ODET::t0;
+        const double t_end = ODET::t_end;
+        const double delta_t =
+            (num_timesteps == 0) ? -1.0 : ((t_end - t0) / num_timesteps);
+
+        DBUG("Running test with {:d} timesteps of size {:g} s.", num_timesteps,
+             delta_t);
+
+        // initial condition
+        GlobalVector x0(ode.getMatrixSpecifications(process_id).nrows);
+        ODET::setIC(x0);
+
+        sol.ts.push_back(t0);
+        sol.solutions.push_back(x0);
+
+        auto cb = [&sol](const double t, GlobalVector const& x)
+        {
+            sol.ts.push_back(t);
+            sol.solutions.push_back(x);
+        };
+
+        if (num_timesteps > 0)
+        {
+            EXPECT_TRUE(loop.loop(t0, x0, t_end, delta_t, cb).error_norms_met);
+        }
+
+        for (auto& x : sol.solutions)
+        {
+            MathLib::LinAlg::setLocalAccessibleVector(x);
+        }
+
+        return sol;
+    }
+
+private:
+    const double _tol = 1e-9;
+    const unsigned _maxiter = 20;
+};
+
+template <typename TimeDisc, typename ODE, NumLib::NonlinearSolverTag NLTag>
+typename std::enable_if<std::is_same_v<TimeDisc, NumLib::BackwardEuler>,
+                        Solution>::type
+run_test_case(const unsigned num_timesteps)
+{
+    ODE ode;
+    TimeDisc timeDisc;
+
+    TestOutput<NLTag> test;
+    return test.run_test(ode, timeDisc, num_timesteps);
+}
+
+// This class is only here s.t. I don't have to put the members into
+// the definition of the macro TCLITEM below.
+template <class ODE_, class TimeDisc_>
+struct TestCaseBase
+{
+    using ODE = ODE_;
+    using TimeDisc = TimeDisc_;
+};
+
+template <class ODE_, class TimeDisc_>
+struct TestCase;
+
+// /////////////////////////////////////
+//
+//  Put new test cases to that list
+//
+//  Arguments are: The ODE, the used time discretization
+//                 the absolute infinity-norm tolerance when comparing Picard to
+//                 Newton results, and the absolute infinity-norm tolerance when
+//                 comparing the numerical to the analytical solution
+//
+// /////////////////////////////////////
+#define TESTCASESLIST                                                  \
+    TCLITEM(ODE1, BackwardEuler, 1e-14, 0.2)                           \
+    TCLSEP TCLITEM(ODE2, BackwardEuler, 1.5e-10, 2e-3) TCLSEP TCLITEM( \
+        ODE3, BackwardEuler, 1e-9, 0.028)
+
+#define TCLITEM(ODE, TIMEDISC, TOL_PICARD_NEWTON, TOL_ANALYT)         \
+    template <>                                                       \
+    struct TestCase<ODE, NumLib::TIMEDISC>                            \
+        : TestCaseBase<ODE, NumLib::TIMEDISC>                         \
+    {                                                                 \
+        static const double tol_picard_newton;                        \
+        static const double tol_analyt;                               \
+    };                                                                \
+    const double TestCase<ODE, NumLib::TIMEDISC>::tol_picard_newton = \
+        (TOL_PICARD_NEWTON);                                          \
+    const double TestCase<ODE, NumLib::TIMEDISC>::tol_analyt = (TOL_ANALYT);
+#define TCLSEP
+
+TESTCASESLIST
+
+#undef TCLITEM
+#undef TCLSEP
+
+#define TCLITEM(ODE, TIMEDISC, TOL_PICARD_NEWTON, TOL_ANALYT) \
+    TestCase<ODE, NumLib::TIMEDISC>
+#define TCLSEP ,
+
+using TestCases = ::testing::Types<TESTCASESLIST>;
+
+#undef TESTCASESLIST
+#undef TCLSEP
+#undef TCLITEM
+
+template <class TestParams>
+class NumLibODEIntTyped : public ::testing::Test
+{
+public:
+    using ODE = typename TestParams::ODE;
+    using TimeDisc = typename TestParams::TimeDisc;
+
+    static void test()
+    {
+        const unsigned num_timesteps = 100;
+
+        auto const sol_picard =
+            run_test_case<TimeDisc, ODE, NumLib::NonlinearSolverTag::Picard>(
+                num_timesteps);
+
+        auto const sol_newton =
+            run_test_case<TimeDisc, ODE, NumLib::NonlinearSolverTag::Newton>(
+                num_timesteps);
+
+        ASSERT_EQ(sol_picard.ts.size(), sol_newton.ts.size());
+        for (std::size_t i = 0; i < sol_picard.ts.size(); ++i)
+        {
+            ASSERT_EQ(sol_picard.ts[i], sol_newton.ts[i]);
+            for (int comp = 0;
+                 comp < static_cast<int>(sol_picard.solutions[i].size());
+                 ++comp)
+            {
+                EXPECT_NEAR(sol_picard.solutions[i][comp],
+                            sol_newton.solutions[i][comp],
+                            TestParams::tol_picard_newton);
+
+                auto const t = sol_picard.ts[i];
+                auto sol_analyt = ODETraits<ODE>::solution(t);
+                MathLib::LinAlg::setLocalAccessibleVector(sol_analyt);
+
+                EXPECT_NEAR(sol_picard.solutions[i][comp], sol_analyt[comp],
+                            TestParams::tol_analyt);
+                EXPECT_NEAR(sol_newton.solutions[i][comp], sol_analyt[comp],
+                            TestParams::tol_analyt);
+            }
+        }
+    }
+};
+
+TYPED_TEST_SUITE(NumLibODEIntTyped, TestCases);
+
+// Temporarily disabled for PETSc issue #1989
+#ifndef USE_PETSC
+TYPED_TEST(NumLibODEIntTyped, T1)
+#else
+TYPED_TEST(NumLibODEIntTyped, DISABLED_T1)
+#endif
+{
+    TestFixture::test();
+}
+
+/* TODO Other possible test cases:
+ *
+ * * check that the order of time discretization scales correctly
+ *   with the timestep size
+ */
+
+// OGS_FATAL aborts (uncatchable) instead of throwing in this build, so the
+// rejection cannot be observed with EXPECT_ANY_THROW.
+#ifndef OGS_FATAL_ABORT
+// Runs a single Picard step on the linear ODE1 with the given acceleration
+// parameters and returns nothing; the caller wraps it in EXPECT_ANY_THROW.
+void runLinearPicardStep(int const anderson_depth, double const damping)
+{
+    using ODE = ODE1;
+    constexpr auto NLTag = NumLib::NonlinearSolverTag::Picard;
+    using NLSolver = NumLib::NonlinearSolver<NLTag>;
+
+    ODE ode;
+    NumLib::BackwardEuler time_disc;
+
+    int const process_id = 0;
+    NumLib::TimeDiscretizedODESystem<ODE::ODETag, NLTag> ode_sys(
+        process_id, ode, time_disc);
+
+    auto linear_solver = createLinearSolver();
+    auto conv_crit = std::make_unique<NumLib::ConvergenceCriterionDeltaX>(
+        1e-9, std::nullopt, MathLib::VecNormType::NORM2);
+    auto nonlinear_solver = std::make_unique<NLSolver>(
+        *linear_solver, /*maxiter=*/20, anderson_depth, damping);
+
+    NumLib::TimeLoopSingleODE<NLTag> loop(ode_sys, std::move(linear_solver),
+                                          std::move(nonlinear_solver),
+                                          std::move(conv_crit));
+
+    GlobalVector x0(ode.getMatrixSpecifications(process_id).nrows);
+    ODETraits<ODE>::setIC(x0);
+
+    double const t0 = ODETraits<ODE>::t0;
+    double const t_end = ODETraits<ODE>::t_end;
+    // A timestep smaller than the whole interval, so the time loop actually
+    // enters and invokes the nonlinear solver (a single step of exactly
+    // t_end - t0 would leave t == t_end, which the loop's t < t_end + eps guard
+    // rejects at this magnitude). One solver call is enough to hit the guard.
+    double const delta_t = (t_end - t0) / 2.0;
+    auto cb = [](double const /*t*/, GlobalVector const& /*x*/) {};
+    loop.loop(t0, x0, t_end, delta_t, cb);
+}
+
+// A single Picard step already solves a linear system exactly, so damping and
+// Anderson acceleration would make the solver accept a modified iterate as
+// converged but wrong. NonlinearSolver<Picard>::solve must reject both on a
+// linear equation system (ODE1 is linear).
+//
+// ODE1::getMatrixSpecifications() provides no sparsity pattern, which the
+// PETSc backend requires for matrix preallocation (see the DISABLED_T1
+// comment above for the same issue, #1989). Under PETSc that unrelated
+// exception would satisfy EXPECT_ANY_THROW by accident while failing
+// EXPECT_NO_THROW for real, so disable these tests there too.
+#ifndef USE_PETSC
+TEST(NumLibPicardLinearGuard, AndersonDepthOnLinearSystemAborts)
+{
+    EXPECT_ANY_THROW(
+        runLinearPicardStep(/*anderson_depth=*/2, /*damping=*/1.0));
+}
+
+TEST(NumLibPicardLinearGuard, DampingOnLinearSystemAborts)
+{
+    EXPECT_ANY_THROW(
+        runLinearPicardStep(/*anderson_depth=*/0, /*damping=*/0.5));
+}
+
+// The guard must not fire when neither acceleration is requested: plain Picard
+// on a linear system is exactly the supported case.
+TEST(NumLibPicardLinearGuard, PlainPicardOnLinearSystemRuns)
+{
+    EXPECT_NO_THROW(runLinearPicardStep(/*anderson_depth=*/0, /*damping=*/1.0));
+}
+
+// A depth below AndersonAcceleration::min_mixing_depth stores at most one step,
+// which the sum-to-one constraint forces to unit weight, i.e. the iterate is
+// the plain Picard one. The guard must therefore not fire for it either.
+TEST(NumLibPicardLinearGuard, InertAndersonDepthOnLinearSystemRuns)
+{
+    EXPECT_NO_THROW(runLinearPicardStep(/*anderson_depth=*/1, /*damping=*/1.0));
+}
+#endif  // USE_PETSC
+#endif  // OGS_FATAL_ABORT
+
+}  // namespace TestODEInt

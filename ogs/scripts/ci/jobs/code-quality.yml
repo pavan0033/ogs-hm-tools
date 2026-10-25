@@ -1,0 +1,39 @@
+cppcheck:
+  stage: check
+  needs: [meta]
+  tags: [envinf, shell]
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - when: on_success
+  before_script:
+    - rm -rf ../build/cppcheck
+    - mkdir -p ../build/cppcheck
+    - ln -s ../build/cppcheck build
+    - cd ../build/cppcheck
+  script:
+    - >
+      cmake ../../ogs -G Ninja -DCMAKE_BUILD_TYPE=Release -DOGS_BUILD_UTILS=OFF
+      -DOGS_USE_UNITY_BUILDS=OFF
+    - bash cppcheck.sh
+  artifacts:
+    when: always
+    reports:
+      codequality: build/cppcheck.json
+    paths:
+      - build/cppcheck.json
+
+ruff:
+  stage: check
+  needs: []
+  tags: [shell]
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - when: on_success
+  script:
+    - uvx ruff==0.13.1 check --exit-zero --output-format gitlab . > ruff-report.json
+    - uvx ruff==0.13.1 check .
+  artifacts:
+    reports:
+      codequality: ruff-report.json

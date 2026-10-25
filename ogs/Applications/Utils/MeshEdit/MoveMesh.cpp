@@ -1,0 +1,104 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <tclap/CmdLine.h>
+
+#include "BaseLib/FileTools.h"
+#include "BaseLib/Logging.h"
+#include "BaseLib/MPI.h"
+#include "BaseLib/StringTools.h"
+#include "BaseLib/TCLAPArguments.h"
+#include "GeoLib/AABB.h"
+#include "InfoLib/GitInfo.h"
+#include "MeshLib/Elements/Element.h"
+#include "MeshLib/IO/readMeshFromFile.h"
+#include "MeshLib/IO/writeMeshToFile.h"
+#include "MeshLib/Mesh.h"
+#include "MeshLib/Node.h"
+#include "MeshToolsLib/MeshEditing/moveMeshNodes.h"
+
+int main(int argc, char* argv[])
+{
+    TCLAP::CmdLine cmd(
+        "Moves the mesh nodes using the given displacement vector or if no "
+        "displacement vector is given, moves the mesh nodes such that the "
+        "centroid of the given mesh is in the origin.\n\n"
+        "OpenGeoSys-6 software, version " +
+            GitInfoLib::GitInfo::ogs_version +
+            ".\n"
+            "Copyright (c) 2012-2026, OpenGeoSys Community "
+            "(http://www.opengeosys.org)",
+        ' ', GitInfoLib::GitInfo::ogs_version);
+    // Define a value argument and add it to the command line.
+    // A value arg defines a flag and a type of value that it expects,
+    // such as "-m meshfile".
+    TCLAP::ValueArg<std::string> mesh_arg("m", "mesh", "Input (.vtu) mesh file",
+                                          true, "", "INPUT_FILE");
+
+    // Add the argument mesh_arg to the CmdLine object. The CmdLine object
+    // uses this Arg to parse the command line.
+    cmd.add(mesh_arg);
+
+    TCLAP::ValueArg<double> x_arg("x", "x", "displacement in x direction",
+                                  false, 0.0, "DISPLACEMENT_X");
+    cmd.add(x_arg);
+    TCLAP::ValueArg<double> y_arg("y", "y", "displacement in y direction",
+                                  false, 0.0, "DISPLACEMENT_Y");
+    cmd.add(y_arg);
+    TCLAP::ValueArg<double> z_arg("z", "z", "displacement in z direction",
+                                  false, 0.0, "DISPLACEMENT_Z");
+    cmd.add(z_arg);
+
+    TCLAP::ValueArg<std::string> mesh_out_arg("o", "output-mesh",
+                                              "Output (.vtu) mesh file", false,
+                                              "", "OUTPUT_FILE");
+    cmd.add(mesh_out_arg);
+
+    auto log_level_arg = BaseLib::makeLogLevelArg();
+    cmd.add(log_level_arg);
+    cmd.parse(argc, argv);
+
+    BaseLib::MPI::Setup mpi_setup(argc, argv);
+    BaseLib::initOGSLogger(log_level_arg.getValue());
+
+    std::string fname(mesh_arg.getValue());
+
+    std::unique_ptr<MeshLib::Mesh> mesh(MeshLib::IO::readMeshFromFile(fname));
+
+    if (!mesh)
+    {
+        ERR("Could not read mesh from file '{:s}'.", fname);
+        return EXIT_FAILURE;
+    }
+
+    Eigen::Vector3d displacement{x_arg.getValue(), y_arg.getValue(),
+                                 z_arg.getValue()};
+    if (fabs(x_arg.getValue()) < std::numeric_limits<double>::epsilon() &&
+        fabs(y_arg.getValue()) < std::numeric_limits<double>::epsilon() &&
+        fabs(z_arg.getValue()) < std::numeric_limits<double>::epsilon())
+    {
+        GeoLib::AABB aabb(mesh->getNodes().begin(), mesh->getNodes().end());
+        auto const [min, max] = aabb.getMinMaxPoints();
+        displacement = -(max + min) / 2.0;
+    }
+
+    INFO("translate model ({:f}, {:f}, {:f}).",
+         displacement[0],
+         displacement[1],
+         displacement[2]);
+    MeshToolsLib::moveMeshNodes(mesh->getNodes().begin(),
+                                mesh->getNodes().end(), displacement);
+
+    std::string out_fname(mesh_out_arg.getValue());
+    if (out_fname.empty())
+    {
+        out_fname = BaseLib::dropFileExtension(mesh_out_arg.getValue());
+        out_fname += "_displaced.vtu";
+    }
+
+    if (MeshLib::IO::writeMeshToFile(*mesh, out_fname) != 0)
+    {
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}

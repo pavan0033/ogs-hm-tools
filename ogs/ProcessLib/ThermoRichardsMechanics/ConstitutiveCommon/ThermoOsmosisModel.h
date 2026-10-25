@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "Base.h"
+#include "LiquidDensityData.h"
+#include "LiquidViscosityData.h"
+#include "MediaData.h"
+#include "PermeabilityData.h"
+#include "TemperatureData.h"
+#include "ThermoOsmosisData.h"
+
+namespace ProcessLib::ThermoRichardsMechanics
+{
+template <int DisplacementDim>
+struct ThermoOsmosisModel
+{
+    void eval(SpaceTimeData const& x_t, MediaData const& media_data,
+              TemperatureData<DisplacementDim> const& T_data,
+              LiquidDensityData const& rho_L_data,
+              PermeabilityData<DisplacementDim> const& perm_data,
+              LiquidViscosityData const& mu_L_data,
+              ThermoOsmosisData<DisplacementDim>& out) const;
+};
+
+extern template struct ThermoOsmosisModel<2>;
+extern template struct ThermoOsmosisModel<3>;
+}  // namespace ProcessLib::ThermoRichardsMechanics

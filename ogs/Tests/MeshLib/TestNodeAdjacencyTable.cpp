@@ -1,0 +1,132 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <gtest/gtest.h>
+
+#include <memory>
+
+#include "MeshLib/Elements/Element.h"
+#include "MeshLib/Mesh.h"
+#include "MeshLib/Node.h"
+#include "MeshLib/NodeAdjacencyTable.h"
+#include "MeshToolsLib/MeshGenerators/MeshGenerator.h"
+
+TEST(MeshLib, CreateNodeAdjacencyTable1D)
+{
+    using namespace MeshLib;
+
+    std::unique_ptr<Mesh> mesh(MeshToolsLib::MeshGenerator::generateLineMesh(
+        double(1), std::size_t(10)));
+
+    NodeAdjacencyTable table(*mesh);
+
+    // There must be as many entries as there are nodes in the mesh.
+    ASSERT_EQ(mesh->getNumberOfNodes(), table.size());
+
+    // Minimum connectivity for line mesh is 2 for boundary nodes,
+    // and the maximum is 3 for interior nodes.
+    std::size_t const nnodes = mesh->getNumberOfNodes();
+    for (std::size_t i = 0; i < nnodes; ++i)
+    {
+        std::size_t const n_connections = table.getNodeDegree(i);
+
+        std::size_t const n_elements =
+            mesh->getElementsConnectedToNode(i).size();
+        switch (n_elements)
+        {
+            case 1:  // a corner node has 2 adjacent nodes.
+                ASSERT_EQ(2, n_connections) << " for boundary node " << i;
+                break;
+            case 2:  // an interior node has 3 adjacent nodes.
+                ASSERT_EQ(3, n_connections) << " for interior node " << i;
+                break;
+            default:
+                FAIL() << "The regular line mesh node has unexpected number "
+                       << "of elements. Node " << i << " has " << n_elements
+                       << " elements.";
+        }
+    }
+}
+
+TEST(MeshLib, CreateNodeAdjacencyTable2D)
+{
+    using namespace MeshLib;
+
+    std::unique_ptr<Mesh> mesh(
+        MeshToolsLib::MeshGenerator::generateRegularQuadMesh(
+            1, 1, std::size_t(10), std::size_t(10)));
+
+    NodeAdjacencyTable table(*mesh);
+
+    // There must be as many entries as there are nodes in the mesh.
+    ASSERT_EQ(mesh->getNumberOfNodes(), table.size());
+
+    std::size_t const nnodes = mesh->getNumberOfNodes();
+    for (std::size_t i = 0; i < nnodes; ++i)
+    {
+        std::size_t const n_connections = table.getNodeDegree(i);
+
+        std::size_t const n_elements =
+            mesh->getElementsConnectedToNode(i).size();
+        switch (n_elements)
+        {
+            case 1:  // a corner node has 4 adjacent nodes.
+                ASSERT_EQ(4, n_connections) << " for corner node " << i;
+                break;
+            case 2:  // a boundary node has 6 adjacent nodes.
+                ASSERT_EQ(6, n_connections) << " for boundary node " << i;
+                break;
+            case 4:  // an interior node has 9 connections.
+                ASSERT_EQ(9, n_connections) << " for interior node " << i;
+                break;
+            default:
+                FAIL() << "The regular quad mesh node has unexpected number "
+                       << "of elements. Node " << i << " has " << n_elements
+                       << " elements.";
+        }
+    }
+}
+
+TEST(MeshLib, CreateNodeAdjacencyTable3D)
+{
+    using namespace MeshLib;
+
+    std::unique_ptr<Mesh> mesh(
+        MeshToolsLib::MeshGenerator::generateRegularHexMesh(1, 1, 1, 10.0, 10.0,
+                                                            10.0));
+    // double(1), double(1), double(1), std::size_t(10), std::size_t(10),
+    // std::size_t(10)));
+
+    NodeAdjacencyTable table(*mesh);
+
+    // There must be as many entries as there are nodes in the mesh.
+    ASSERT_EQ(mesh->getNumberOfNodes(), table.size());
+
+    std::size_t const nnodes = mesh->getNumberOfNodes();
+    for (std::size_t i = 0; i < nnodes; ++i)
+    {
+        std::size_t const n_connections = table.getNodeDegree(i);
+
+        std::size_t const n_elements =
+            mesh->getElementsConnectedToNode(i).size();
+        switch (n_elements)
+        {
+            case 1:  // a corner node has 8 adjacent nodes.
+                ASSERT_EQ(8, n_connections) << " for corner node " << i;
+                break;
+            case 2:  // an edge node has 12 adjacent nodes.
+                ASSERT_EQ(12, n_connections) << " for edge node " << i;
+                break;
+            case 3:  // a boundary node has 18 adjacent nodes.
+                ASSERT_EQ(18, n_connections) << " for boundary node " << i;
+                break;
+            case 4:  // an interior node has 27 connections.
+                ASSERT_EQ(27, n_connections) << " for interior node " << i;
+                break;
+            default:
+                FAIL() << "The regular hex mesh node has unexpected number "
+                       << "of elements. Node " << i << " has " << n_elements
+                       << " elements.";
+        }
+    }
+}

@@ -1,0 +1,11 @@
+build mac:
+  tags: [mac, arm64]
+  extends:
+    - .template-build-linux
+    - .test-artifacts
+  needs: [meta]
+  variables:
+    CHECK_WARNINGS: "true"
+    CMAKE_PRESET: release-all
+    CMAKE_ARGS: >-
+      -DOGS_BUILD_HDF5=ON

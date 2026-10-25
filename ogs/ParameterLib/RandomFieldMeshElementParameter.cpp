@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "RandomFieldMeshElementParameter.h"
+
+#include <functional>
+#include <random>
+
+#include "BaseLib/ConfigTree.h"
+#include "MeshLib/Mesh.h"
+#include "MeshLib/Utils/addPropertyToMesh.h"
+
+namespace ParameterLib
+{
+std::unique_ptr<ParameterBase> createRandomFieldMeshElementParameter(
+    std::string const& name, BaseLib::ConfigTree const& config,
+    MeshLib::Mesh& mesh)
+{
+    //! \ogs_file_param{prj__parameters__parameter__type}
+    config.checkConfigParameter("type", "RandomFieldMeshElement");
+    auto const field_name =
+        //! \ogs_file_param{prj__parameters__parameter__RandomFieldMeshElement__field_name}
+        config.getConfigParameter<std::string>("field_name");
+    auto const range =
+        //! \ogs_file_param{prj__parameters__parameter__RandomFieldMeshElement__range}
+        config.getConfigParameter<std::vector<double>>("range");
+    if (range.size() != 2)
+    {
+        OGS_FATAL(
+            "The range needs to have two components, but {:d} were given.",
+            range.size());
+    }
+    auto const seed =
+        //! \ogs_file_param{prj__parameters__parameter__RandomFieldMeshElement__seed}
+        config.getConfigParameter<int>("seed");
+    DBUG("Generating field {:s} with range {:g} to {:g} and seed {:d}.",
+         field_name, range[0], range[1], seed);
+
+    std::vector<double> values(mesh.getElements().size());
+
+    std::mt19937 generator(seed);
+    std::uniform_real_distribution<> distr(range[0], range[1]);
+    auto gen = [&distr, &generator]() { return distr(generator); };
+    generate(begin(values), end(values), gen);
+
+    MeshLib::addPropertyToMesh<double>(
+        mesh, field_name, MeshLib::MeshItemType::Cell, 1, {values});
+
+    auto const& property =
+        mesh.getProperties().getPropertyVector<double>(field_name);
+
+    if (property->getMeshItemType() != MeshLib::MeshItemType::Cell)
+    {
+        OGS_FATAL("The mesh property `{:s}' is not an element property.",
+                  field_name);
+    }
+
+    return std::make_unique<RandomFieldMeshElementParameter<double>>(name, mesh,
+                                                                     *property);
+}
+
+}  // namespace ParameterLib

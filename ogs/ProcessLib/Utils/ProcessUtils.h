@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <string>
+#include <vector>
+
+namespace BaseLib
+{
+class ConfigTree;
+}
+namespace ProcessLib
+{
+class ProcessVariable;
+}
+
+namespace ProcessLib
+{
+/// Find process variables in \c variables whose names match the settings under
+/// the given \c tag_names in the \c process_config.
+///
+/// In the process config a process variable is referenced by a name. For
+/// example it will be looking for a variable named "H" in the list of process
+/// variables when the tag is "hydraulic_head":
+/// \code
+///     <process>
+///         ...
+///         <process_variables>
+///             <hydraulic_head>H</hydraulic_head>
+///             ...
+///         </process_variables>
+///         ...
+///     </process>
+/// \endcode
+///
+/// \return a vector of references to the found variable(s).
+std::vector<std::reference_wrapper<ProcessVariable>> findProcessVariables(
+    std::vector<ProcessVariable> const& variables,
+    BaseLib::ConfigTree const& pv_config,
+    std::initializer_list<std::string>
+        tags);
+
+std::vector<std::reference_wrapper<ProcessVariable>> findProcessVariables(
+    std::vector<ProcessVariable> const& variables,
+    BaseLib::ConfigTree const& pv_config, std::string const& tag,
+    bool const optional = false);
+
+}  // namespace ProcessLib

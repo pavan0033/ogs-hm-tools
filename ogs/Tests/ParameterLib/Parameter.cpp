@@ -1,0 +1,359 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <gtest/gtest.h>
+
+#include <boost/property_tree/xml_parser.hpp>
+#include <numeric>
+#include <sstream>
+#include <vector>
+
+#include "BaseLib/ConfigTree.h"
+#include "BaseLib/Logging.h"
+#include "GeoLib/Raster.h"
+#include "MeshLib/Mesh.h"
+#include "MeshLib/Node.h"
+#include "MeshLib/PropertyVector.h"
+#include "MeshLib/Utils/addPropertyToMesh.h"
+#include "MeshToolsLib/MeshGenerators/MeshGenerator.h"
+#include "ParameterLib/ConstantParameter.h"
+#include "ParameterLib/CurveScaledParameter.h"
+#include "ParameterLib/GroupBasedParameter.h"
+#include "Tests/TestTools.h"
+
+using namespace ParameterLib;
+
+std::unique_ptr<Parameter<double>> constructParameterFromString(
+    std::string const& xml,
+    std::vector<std::unique_ptr<MeshLib::Mesh>> const& meshes,
+    std::map<std::string,
+             std::unique_ptr<MathLib::PiecewiseLinearInterpolation>> const&
+        curves = {})
+{
+    auto xml_ptree = Tests::readXml(xml.c_str());
+    BaseLib::ConfigTree config_tree(std::move(xml_ptree), "",
+                                    BaseLib::ConfigTree::onerror,
+                                    BaseLib::ConfigTree::onwarning);
+    auto parameter_base = createParameter(config_tree, meshes, {}, curves);
+    return std::unique_ptr<Parameter<double>>(
+        static_cast<Parameter<double>*>(parameter_base.release()));
+}
+
+struct ParameterLibParameter : public ::testing::Test
+{
+    void SetUp() override
+    {
+        // A mesh with four elements, five points.
+        meshes.emplace_back(
+            MeshToolsLib::MeshGenerator::generateLineMesh(4u, 1.0));
+    }
+    std::vector<std::unique_ptr<MeshLib::Mesh>> meshes;
+};
+
+TEST_F(ParameterLibParameter, GroupBasedParameterElement)
+{
+    std::vector<int> mat_ids({0, 1, 2, 3});
+    MeshLib::addPropertyToMesh<int>(*meshes[0], "MaterialIDs",
+                                    MeshLib::MeshItemType::Cell, 1, {mat_ids});
+
+    auto parameter = constructParameterFromString(
+        "<name>parameter</name>"
+        "<type>Group</type>"
+        "<group_id_property>MaterialIDs</group_id_property>"
+        "<index_values><index>0</index><value>0</value></index_values>"
+        "<index_values><index>1</index><value>100</value></index_values>"
+        "<index_values><index>3</index><value>300</value></index_values>",
+        meshes);
+
+    double t = 0;
+    ParameterLib::SpatialPosition x;
+    x.setElementID(0);
+    ASSERT_EQ(0.0, (*parameter)(t, x)[0]);
+    x.setElementID(1);
+    ASSERT_EQ(100.0, (*parameter)(t, x)[0]);
+    x.setElementID(2);
+    ASSERT_ANY_THROW((*parameter)(t, x));
+    x.setElementID(3);
+    ASSERT_EQ(300.0, (*parameter)(t, x)[0]);
+}
+
+TEST_F(ParameterLibParameter, GroupBasedParameterNode)
+{
+    std::vector<int> group_ids({0, 1, 2, 3, 4});
+    MeshLib::addPropertyToMesh<int>(*meshes[0], "PointGroupIDs",
+                                    MeshLib::MeshItemType::Node, 1,
+                                    {group_ids});
+
+    auto parameter = constructParameterFromString(
+        "<name>parameter</name>"
+        "<type>Group</type>"
+        "<group_id_property>PointGroupIDs</group_id_property>"
+        "<index_values><index>0</index><value>0</value></index_values>"
+        "<index_values><index>1</index><value>100</value></index_values>"
+        "<index_values><index>3</index><value>300</value></index_values>",
+        meshes);
+
+    double t = 0;
+    ParameterLib::SpatialPosition x;
+    x.setNodeID(0);
+    ASSERT_EQ(0.0, (*parameter)(t, x)[0]);
+    x.setNodeID(1);
+    ASSERT_EQ(100.0, (*parameter)(t, x)[0]);
+    x.setNodeID(2);
+    ASSERT_ANY_THROW((*parameter)(t, x));
+    x.setNodeID(3);
+    ASSERT_EQ(300.0, (*parameter)(t, x)[0]);
+    x.setNodeID(4);
+    ASSERT_ANY_THROW((*parameter)(t, x));
+}
+
+bool testNodalValuesOfElement(
+    std::vector<MeshLib::Element*> const& elements,
+    std::function<double(MeshLib::Element* const e,
+                         std::size_t const local_node_id)>
+        get_expected_value,
+    Parameter<double> const& parameter,
+    double const t)
+{
+    return std::all_of(
+        begin(elements), end(elements),
+        [&](MeshLib::Element* const e)
+        {
+            // scalar values, 2 nodes.
+            Eigen::Matrix<double, 2, 1> const nodal_values =
+                parameter.getNodalValuesOnElement(*e, t);
+            if (nodal_values.rows() != static_cast<int>(e->getNumberOfNodes()))
+            {
+                ERR("Expected equal number of element nodes and the nodal "
+                    "values.");
+                return false;
+            }
+            for (std::size_t i = 0; i < e->getNumberOfNodes(); ++i)
+            {
+                double const expected_value = get_expected_value(e, i);
+                if (expected_value != nodal_values(i, 0))
+                {
+                    ERR("Mismatch for element {:d}, node {:d}; Expected {:g}, "
+                        "got {:g}.",
+                        e->getID(), i, expected_value, nodal_values(i, 0));
+                    return false;
+                }
+            }
+            return true;
+        });
+}
+
+// For all elements all nodes have a constant value.
+TEST_F(ParameterLibParameter, GetNodalValuesOnElement_constant)
+{
+    auto const parameter = constructParameterFromString(
+        "<name>parameter</name>"
+        "<type>Constant</type>"
+        "<value>42.23</value>",
+        meshes);
+
+    double const t = 0;
+    auto expected_value =
+        [](MeshLib::Element* const /*e*/, std::size_t const /*local_node_id*/)
+    { return 42.23; };
+
+    ASSERT_TRUE(testNodalValuesOfElement(meshes[0]->getElements(),
+                                         expected_value, *parameter, t));
+}
+
+TEST_F(ParameterLibParameter, GetNodalValuesOnElement_node)
+{
+    std::vector<double> node_ids({0, 1, 2, 3, 4});
+    MeshLib::addPropertyToMesh<double>(
+        *meshes[0], "NodeIDs", MeshLib::MeshItemType::Node, 1, {node_ids});
+
+    auto const parameter = constructParameterFromString(
+        "<name>parameter</name>"
+        "<type>MeshNode</type>"
+        "<field_name>NodeIDs</field_name>",
+        meshes);
+
+    double const t = 0;
+
+    // For all elements all nodes have the value of the node id.
+    auto expected_value =
+        [](MeshLib::Element* const e, std::size_t const local_node_id)
+    {
+        return static_cast<double>(
+            e->getNode(static_cast<unsigned>(local_node_id))->getID());
+    };
+
+    ASSERT_TRUE(testNodalValuesOfElement(meshes[0]->getElements(),
+                                         expected_value, *parameter, t));
+}
+
+TEST_F(ParameterLibParameter, GetNodalValuesOnElement_element)
+{
+    std::vector<double> element_ids({0, 1, 2, 3});
+    MeshLib::addPropertyToMesh<double>(*meshes[0], "ElementIDs",
+                                       MeshLib::MeshItemType::Cell, 1,
+                                       {element_ids});
+
+    auto const parameter = constructParameterFromString(
+        "<name>parameter</name>"
+        "<type>MeshElement</type>"
+        "<field_name>ElementIDs</field_name>",
+        meshes);
+
+    double const t = 0;
+
+    // For all elements all nodes have the value of the element id.
+    auto expected_value =
+        [](MeshLib::Element* const e, std::size_t const /*local_node_id*/)
+    { return static_cast<double>(e->getID()); };
+
+    ASSERT_TRUE(testNodalValuesOfElement(meshes[0]->getElements(),
+                                         expected_value, *parameter, t));
+}
+
+TEST_F(ParameterLibParameter, GetNodalValuesOnElement_curveScaledNode)
+{
+    std::vector<double> node_ids({0, 1, 2, 3, 4});
+    MeshLib::addPropertyToMesh<double>(
+        *meshes[0], "NodeIDs", MeshLib::MeshItemType::Node, 1, {node_ids});
+
+    std::vector<std::unique_ptr<ParameterBase>> parameters;
+    parameters.emplace_back(
+        constructParameterFromString("<name>NodeIDs</name>"
+                                     "<type>MeshNode</type>"
+                                     "<field_name>NodeIDs</field_name>",
+                                     meshes));
+
+    std::map<std::string,
+             std::unique_ptr<MathLib::PiecewiseLinearInterpolation>>
+        curves;
+    curves["linear_curve"] =
+        std::make_unique<MathLib::PiecewiseLinearInterpolation>(
+            std::vector<double>{0, 1}, std::vector<double>{0, 1}, true);
+
+    auto const parameter = constructParameterFromString(
+        "<name>parameter</name>"
+        "<type>CurveScaled</type>"
+        "<curve>linear_curve</curve>"
+        "<parameter>NodeIDs</parameter>",
+        meshes, curves);
+
+    parameter->initialize(parameters);
+
+    double const t = 0.5;
+
+    // For all elements all nodes have the value of the node id times the time.
+    auto expected_value =
+        [&t](MeshLib::Element* const e, std::size_t const local_node_id)
+    {
+        return static_cast<double>(
+                   e->getNode(static_cast<unsigned>(local_node_id))->getID()) *
+               t;
+    };
+
+    ASSERT_TRUE(testNodalValuesOfElement(meshes[0]->getElements(),
+                                         expected_value, *parameter, t));
+}
+
+TEST_F(ParameterLibParameter,
+       GetNamedOrCreateInlineParameter_EmptyInlineValuesThrows)
+{
+    // empty inline values
+    auto const xml =
+        "<property>"
+        "  <dry_thermal_conductivity></dry_thermal_conductivity>"
+        "</property>";
+
+    auto xml_ptree = Tests::readXml(xml);
+    BaseLib::ConfigTree config_tree(std::move(xml_ptree), "",
+                                    BaseLib::ConfigTree::onerror,
+                                    BaseLib::ConfigTree::onwarning);
+
+    std::vector<std::unique_ptr<ParameterBase>> parameters;
+
+    EXPECT_THROW(
+        (void)getNamedOrCreateInlineParameter(
+            config_tree.getConfigSubtree("property")
+                .getConfigParameter<std::string>("dry_thermal_conductivity"),
+            parameters,
+            "SaturationWeightedThermalConductivity",
+            "dry_inline"),
+        std::runtime_error);
+}
+
+TEST_F(ParameterLibParameter,
+       GetNamedOrCreateInlineParameter_InlineConstantCreated)
+{
+    auto const xml =
+        "<property>"
+        "  <dry_thermal_conductivity>1.0 2.0</dry_thermal_conductivity>"
+        "</property>";
+
+    auto xml_ptree = Tests::readXml(xml);
+    BaseLib::ConfigTree config_tree(std::move(xml_ptree), "",
+                                    BaseLib::ConfigTree::onerror,
+                                    BaseLib::ConfigTree::onwarning);
+
+    std::vector<std::unique_ptr<ParameterBase>> parameters;
+
+    auto& p = getNamedOrCreateInlineParameter(
+        config_tree.getConfigSubtree("property")
+            .getConfigParameter<std::string>("dry_thermal_conductivity"),
+        parameters,
+        "SaturationWeightedThermalConductivity",
+        "dry_inline");
+
+    ASSERT_EQ(parameters.size(), 1u);
+    auto const& created = parameters.back();
+    EXPECT_EQ(created->name,
+              "SaturationWeightedThermalConductivity_dry_inline");
+
+    double const t = 0.0;
+    ParameterLib::SpatialPosition x;
+    auto const values = p(t, x);
+    ASSERT_EQ(values.size(), 2u);
+    EXPECT_EQ(values[0], 1.0);
+    EXPECT_EQ(values[1], 2.0);
+}
+
+TEST_F(ParameterLibParameter,
+       GetNamedOrCreateInlineParameter_InlineParameterCreated)
+{
+    std::string pname = "lambda_dry";
+    auto const xml =
+        "<property>"
+        "  <dry_thermal_conductivity>" +
+        pname +
+        "</dry_thermal_conductivity>"
+        "</property>";
+
+    auto xml_ptree = Tests::readXml(xml.c_str());
+    BaseLib::ConfigTree config_tree(std::move(xml_ptree), "",
+                                    BaseLib::ConfigTree::onerror,
+                                    BaseLib::ConfigTree::onwarning);
+
+    std::vector<std::unique_ptr<ParameterBase>> parameters;
+    const std::vector<double> lambda_dry = {1.23456, 2.34567};
+
+    parameters.push_back(
+        std::make_unique<ParameterLib::ConstantParameter<double>>(
+            pname, std::move(lambda_dry)));
+
+    auto& p = getNamedOrCreateInlineParameter(
+        config_tree.getConfigSubtree("property")
+            .getConfigParameter<std::string>("dry_thermal_conductivity"),
+        parameters,
+        "SaturationWeightedThermalConductivity",
+        "dry_inline");
+
+    ASSERT_EQ(parameters.size(), 1u);
+    EXPECT_EQ(p.name, pname);
+
+    double const t = 0.0;
+    ParameterLib::SpatialPosition x;
+    auto const values = p(t, x);
+
+    ASSERT_EQ(values.size(), lambda_dry.size());
+    EXPECT_EQ(values[0], lambda_dry[0]);
+    EXPECT_EQ(values[1], lambda_dry[1]);
+}

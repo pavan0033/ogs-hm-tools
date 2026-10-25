@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+// ** INCLUDES **
+#include "VtkAlgorithmProperties.h"
+
+#include <vtkUnstructuredGridAlgorithm.h>
+
+#include <vector>
+
+/**
+ */
+class VtkAppendArrayFilter : public vtkUnstructuredGridAlgorithm, public VtkAlgorithmProperties
+{
+public:
+    /// @brief Create new objects with New() because of VTKs object reference counting.
+    static VtkAppendArrayFilter* New();
+
+    vtkTypeMacro(VtkAppendArrayFilter, vtkUnstructuredGridAlgorithm);
+
+    /// @brief Prints the mesh data to an output stream.
+    void PrintSelf(ostream& os, vtkIndent indent) override;
+
+    /// @brief Sets user properties.
+    void SetUserProperty(QString name, QVariant value) override
+    {
+        Q_UNUSED(name);
+        Q_UNUSED(value);
+    }
+
+    void SetArray(const std::string& array_name,
+                  const std::vector<double>& new_array);
+
+protected:
+    VtkAppendArrayFilter();
+    ~VtkAppendArrayFilter() override;
+
+    /// @brief The filter logic.
+    int RequestData(vtkInformation* request,
+                    vtkInformationVector** inputVector,
+                    vtkInformationVector* outputVector) override;
+
+private:
+    std::vector<double> _array;
+    std::string _array_name;
+};

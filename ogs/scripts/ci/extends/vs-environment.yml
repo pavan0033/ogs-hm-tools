@@ -1,0 +1,23 @@
+# VS170COMNTOOLS is MSVC 2022
+.load_vs_env: &load_vs_env
+  - |
+    pushd $env:VS170COMNTOOLS
+    cmd /c "VsDevCmd.bat -arch=amd64 -host_arch=amd64&set" |
+    foreach {
+      if ($_ -match "=") {
+        $v = $_.split("=", 2); set-item -force -path "ENV:\$($v[0])"  -value "$($v[1])"
+      }
+    }
+    popd
+    Write-Host "`nVisual Studio Command Prompt variables set." -ForegroundColor Yellow
+
+.vs-environment:
+  before_script:
+    - *load_vs_env
+
+.vs-mkl-environment:
+  before_script:
+    - *load_vs_env
+    # Load MKL environment
+    - Invoke-BatchFile "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\env\vars.bat"
+    - Invoke-BatchFile "C:\Program Files (x86)\Intel\oneAPI\mkl\latest\env\vars.bat"

@@ -1,0 +1,97 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "HeatConductionFEM.h"
+#include "HeatConductionProcessData.h"
+#include "ProcessLib/AssemblyMixin.h"
+#include "ProcessLib/Process.h"
+
+namespace ProcessLib
+{
+namespace HeatConduction
+{
+class HeatConductionProcess final : public Process,
+                                    private AssemblyMixin<HeatConductionProcess>
+{
+    friend class AssemblyMixin<HeatConductionProcess>;
+
+public:
+    HeatConductionProcess(
+        std::string name,
+        MeshLib::Mesh& mesh,
+        std::unique_ptr<ProcessLib::AbstractJacobianAssembler>&&
+            jacobian_assembler,
+        std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const&
+            parameters,
+        unsigned const integration_order,
+        std::vector<std::vector<std::reference_wrapper<ProcessVariable>>>&&
+            process_variables,
+        HeatConductionProcessData&& process_data,
+        SecondaryVariableCollection&& secondary_variables,
+        bool const is_linear,
+        bool const ls_compute_only_upon_timestep_change);
+
+    //! \name ODESystem interface
+    //! @{
+
+    bool isLinear() const override
+    {
+        return AssemblyMixin<HeatConductionProcess>::isLinear();
+    }
+    //! @}
+
+    void computeSecondaryVariableConcrete(double const t, double const dt,
+                                          std::vector<GlobalVector*> const& x,
+                                          GlobalVector const& x_prev,
+                                          int const process_id) override;
+
+    bool shouldLinearSolverComputeOnlyUponTimestepChange() const override
+    {
+        // TODO move this feature to some common location for all processes.
+        return _ls_compute_only_upon_timestep_change;
+    }
+
+private:
+    void initializeConcreteProcess(
+        NumLib::LocalToGlobalIndexMap const& dof_table,
+        MeshLib::Mesh const& mesh,
+        unsigned const integration_order) override;
+
+    std::vector<std::vector<std::string>> initializeAssemblyOnSubmeshes(
+        std::vector<std::reference_wrapper<MeshLib::Mesh>> const& meshes)
+        override;
+
+    void assembleConcreteProcess(const double t, double const /*dt*/,
+                                 std::vector<GlobalVector*> const& x,
+                                 std::vector<GlobalVector*> const& x_prev,
+                                 int const process_id, GlobalMatrix& M,
+                                 GlobalMatrix& K, GlobalVector& b) override;
+
+    void assembleWithJacobianConcreteProcess(
+        const double t, double const /*dt*/,
+        std::vector<GlobalVector*> const& x,
+        std::vector<GlobalVector*> const& x_prev, int const process_id,
+        GlobalVector& b, GlobalMatrix& Jac) override;
+
+    void preTimestepConcreteProcess(std::vector<GlobalVector*> const& /*x*/,
+                                    const double /*t*/,
+                                    const double /*dt*/,
+                                    const int /*process_id*/) override;
+
+    void preOutputConcreteProcess(const double t, double const dt,
+                                  std::vector<GlobalVector*> const& x,
+                                  std::vector<GlobalVector*> const& x_prev,
+                                  int const process_id) override;
+
+    HeatConductionProcessData _process_data;
+
+    std::vector<std::unique_ptr<HeatConductionLocalAssemblerInterface>>
+        local_assemblers_;
+
+    bool const _ls_compute_only_upon_timestep_change;
+};
+
+}  // namespace HeatConduction
+}  // namespace ProcessLib

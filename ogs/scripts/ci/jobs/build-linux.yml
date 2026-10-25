@@ -1,0 +1,114 @@
+linux ctest large:
+  extends:
+    - .template-build-linux
+    - .test-artifacts
+  tags: [shell, envinf]
+  needs: [meta]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+      when: never
+    - when: manual
+      allow_failure: true
+  timeout: 3h
+  variables:
+    BUILD_TESTS: "false"
+    BUILD_CTEST_LARGE: "true"
+    CMAKE_PRESET: release-all
+    CMAKE_ARGS: >-
+      -DOGS_USE_MKL=ON
+      -DOGS_USE_NETCDF=ON
+  before_script:
+    - source /opt/intel/oneapi/setvars.sh
+
+build linux (no unity):
+  extends:
+    - .template-build-linux
+  tags: [shell, envinf]
+  needs: [meta]
+  timeout: 3h
+  variables:
+    BUILD_TESTS: "false"
+    BUILD_CTEST: "false"
+    CHECK_WARNINGS: "true"
+    CMAKE_PRESET: ci-no-unity
+
+build linux debug with sanitizers:
+  extends:
+    - .template-build-linux
+    - .test-artifacts
+  tags: [envinf, shell]
+  needs: [meta]
+  variables:
+    CMAKE_PRESET: sanitizer
+    CMAKE_ARGS: >-
+      -DOGS_CTEST_MAX_RUNTIME=60
+      -DOGS_BUILD_PROCESSES=SteadyStateDiffusion
+
+build linux ubuntu perf:
+  extends:
+    - .template-build-linux
+    - .test-artifacts
+    - .rules-master-manual
+  tags: [shell, ubuntu]
+  needs: [meta]
+  variables:
+    CMAKE_PRESET: release-all
+    CTEST_PARALLEL_LEVEL: 1 # Run ctests serially
+    CTEST_TIMEOUT: 480
+    OGS_PERFORMANCE_TESTS_ALLOWED_TO_FAIL: false
+
+build with pip:
+  stage: build
+  tags: [shell, envinf]
+  needs: [meta]
+  extends:
+    - .test-artifacts
+  variables:
+    GIT_DEPTH: 1000
+  script:
+    - rm -rf .venv ../build/_skbuild  # cleanup build dirs
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip
+    - pip install -e . --group dev -v
+    - ln -s ../build/_skbuild build # .test-artifacts expects a directory "build"
+    - |
+      if [ "$BUILD_TESTS" = true ]; then
+        pytest
+      fi
+    - |
+      if [ "$BUILD_CTEST" = true ]; then
+        ctest --test-dir ../build/_skbuild/cp* -LE large ${CTEST_ARGS}
+      fi
+
+# WIP: standalone ctest config with:
+# cd build-dir
+# fd CTestTestfile.cmake -E _deps -0 | rsync -a --files-from=- --from0 ./ /tmp/ctestfiles/
+# ctest --test-dir /tmp/ctestfiles
+#
+# although some benchmarks still have the build-dir hard-coded
+
+build in devcontainer:
+  extends:
+    - .rules-master-manual
+  stage: build
+  tags: [shell, envinf]
+  needs: [meta]
+  script:
+    - rm -rf ../build/devcontainer-release-all
+    - devcontainer up --workspace-folder .
+    - devcontainer exec --workspace-folder . cmake --preset release-all
+    - devcontainer exec --workspace-folder . cmake --build --preset release-all
+    - devcontainer exec --workspace-folder . cmake --build --preset release-all -t tests
+  after_script:
+    - docker ps --filter "label=devcontainer.local_folder=$(pwd)" --quiet | xargs -r -I {} sh -c ' docker stop {} && docker rm {}'
+
+build linux clang:
+  stage: build
+  extends:
+    - .template-build-linux
+    - .test-artifacts
+  tags: [shell, envinf]
+  needs: [meta]
+  variables:
+    CMAKE_PRESET: clang-release

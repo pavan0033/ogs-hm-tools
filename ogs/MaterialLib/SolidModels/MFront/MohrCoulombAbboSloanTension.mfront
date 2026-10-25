@@ -1,0 +1,476 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+@DSL Implicit;
+@Behaviour MohrCoulombAbboSloanTension;
+@Author Thomas Nagel;
+@Date 05 / 02 / 2019;
+
+@Algorithm NewtonRaphson_NumericalJacobian;
+@MaximumNumberOfIterations 200;
+
+@Description
+{
+Non-associated Mohr-Coulomb with C2 continuity following
+Abbo et al., Int J Solids Struct 48, 2011.
+}
+
+// @Algorithm LevenbergMarquardt;
+//@CompareToNumericalJacobian true;
+//@NumericallyComputedJacobianBlocks {dfeel_ddeel};
+// remove the above blocks once an analytical one is provided.
+// @PerturbationValueForNumericalJacobianComputation 1.e-7;
+//@JacobianComparisonCriterion 1.e-6; // adjust to your needs
+
+@Includes {
+#include <array>
+#include <algorithm>
+#include <limits>
+}
+
+@Brick StandardElasticity;
+
+@Theta 1.0;      // time integration scheme
+@Epsilon 1e-14;  // tolerance of local stress integration algorithm
+@ModellingHypotheses{ "PlaneStrain", "Tridimensional" };
+
+@RequireStiffnessTensor<UnAltered>;
+
+@StateVariable real lam;
+lam.setGlossaryName("EquivalentPlasticStrain");
+
+// eel.setMaximumIncrementValuePerIteration(1.e-5);
+
+@Parameter pi = 3.14159265359;
+@Parameter local_zero_tolerance = 1.e-14;
+
+// Note: YoungModulus and PoissonRatio defined as parameters
+// Note: Glossary names are already given; entry names are newly defined
+
+@MaterialProperty stress c;
+c.setEntryName("Cohesion");
+@MaterialProperty real phi;
+phi.setEntryName("FrictionAngle");
+@MaterialProperty real psi;
+psi.setEntryName("DilatancyAngle");
+@MaterialProperty real lodeT;
+lodeT.setEntryName("TransitionAngle");
+@MaterialProperty stress a;
+a.setEntryName("TensionCutOffParameter");
+
+// Separate Rankine tensile strength, positive in tension (Pa).
+@MaterialProperty stress ft;
+ft.setEntryName("TensileStrength");
+@StateVariable real lt0;
+lt0.setEntryName("TensileMultiplier0");
+@StateVariable real lt1;
+lt1.setEntryName("TensileMultiplier1");
+@StateVariable real lt2;
+lt2.setEntryName("TensileMultiplier2");
+@AuxiliaryStateVariable Stensor et;
+et.setEntryName("TensilePlasticStrain");
+@LocalVariable stress trial0;
+@LocalVariable stress trial1;
+@LocalVariable stress trial2;
+@LocalVariable Stensor P0;
+@LocalVariable Stensor P1;
+@LocalVariable Stensor P2;
+@LocalVariable Stensor np;
+@LocalVariable bool apex_return;
+@LocalVariable bool spectral_return;
+@LocalVariable Stensor spectral_elastic;
+@LocalVariable Stensor spectral_direction;
+@LocalVariable real spectral_lambda;
+@LocalVariable real apex_lambda;
+@LocalVariable real apex_t0;
+@LocalVariable real apex_t1;
+@LocalVariable real apex_t2;
+@LocalVariable Stensor apex_direction;
+
+@LocalVariable bool F;  // if true, plastic loading
+@LocalVariable real sin_psi;
+@LocalVariable real sin_phi;
+@LocalVariable real cos_phi;
+@LocalVariable real cos_lodeT;
+@LocalVariable real sin_lodeT;
+@LocalVariable real tan_lodeT;
+@LocalVariable real cos_3_lodeT;
+@LocalVariable real sin_3_lodeT;
+@LocalVariable real cos_6_lodeT;
+@LocalVariable real sin_6_lodeT;
+@LocalVariable real tan_3_lodeT;
+@LocalVariable real multi;
+@LocalVariable real aG;
+
+@InitLocalVariables
+{
+    constexpr auto sqrt3 = Cste<real>::sqrt3;
+    constexpr auto isqrt3 = Cste<real>::isqrt3;
+    // conversion to rad
+    phi *= pi / 180.;
+    psi *= pi / 180.;
+    lodeT *= pi / 180.;
+    sin_psi = sin(psi);
+    cos_phi = cos(phi);
+    sin_phi = sin(phi);
+    sin_lodeT = sin(lodeT);
+    cos_lodeT = cos(lodeT);
+    tan_lodeT = tan(lodeT);
+    cos_3_lodeT = cos(3. * lodeT);
+    sin_3_lodeT = sin(3. * lodeT);
+    cos_6_lodeT = cos(6. * lodeT);
+    sin_6_lodeT = sin(6. * lodeT);
+    tan_3_lodeT = tan(3. * lodeT);
+
+    /*
+    Note that the case for phi=0 / psi=0 corresponds to a Tresca surface.
+    In that case, a looses physical relevance.
+    */
+    aG = (psi != 0. && phi != 0.) ? (c / tan(psi) - c / tan(phi) + a) : a;
+
+    // Compute initial elastic strain
+    const auto S = invert(D);
+    eel = S * sig;
+
+    if (ft < 0.) { throw std::runtime_error("TensileStrength must be nonnegative"); }
+    // Isotropic return is coaxial with the elastic trial stress. The host
+    // substepping wrapper differentiates the complete updated path, including
+    // the dependence of these projectors on the strain increment.
+    const auto trial = computeElasticPrediction();
+    const auto eig = trial.computeEigenVectors();
+    const auto& vectors = std::get<1>(eig);
+    P0 = Stensor::buildFromEigenValuesAndVectors(real(1),real(0),real(0),vectors);
+    P1 = Stensor::buildFromEigenValuesAndVectors(real(0),real(1),real(0),vectors);
+    P2 = Stensor::buildFromEigenValuesAndVectors(real(0),real(0),real(1),vectors);
+    trial0 = trial|P0; trial1=trial|P1; trial2=trial|P2;
+    np = Stensor(real(0));
+    apex_return = false;
+    spectral_return=false;spectral_lambda=0.;
+    spectral_elastic=Stensor(real(0));spectral_direction=Stensor(real(0));
+    apex_lambda=0.;apex_t0=0.;apex_t1=0.;apex_t2=0.;
+    apex_direction=Stensor(real(0));
+    if(c==0. && a==0. && ft==0. && phi>0.)
+    {
+        // Exact tensile-only return at the cohesionless zero-tension apex.
+        // At sig=0 plastic flow is set-valued. Resolve the non-negative
+        // Rankine-only branch instead of redundant active constraints.
+        const auto e = eval(S*trial);
+        const auto e0=e|P0;const auto e1=e|P1;const auto e2=e|P2;
+        // A positive-semidefinite elastic trial strain can be returned to
+        // zero solely by non-negative Rankine multipliers. This branch needs
+        // no choice of a set-valued MC apex flow (and therefore remains valid
+        // for the rounded Abbo-Sloan deviatoric section).
+        if(e0>=0. && e1>=0. && e2>=0.)
+        {
+            apex_return=true;
+            apex_t0=e0;apex_t1=e1;apex_t2=e2;
+        }
+        else
+        {
+            // A safe subset of mixed apex returns: use the actual rounded
+            // potential gradient at axisymmetric compression along the sole
+            // negative elastic principal direction. Its non-negative Rankine
+            // remainder proves admissibility of this decomposition. This is
+            // not the unsmoothed MC corner gradient.
+            const auto term1=cos_lodeT-isqrt3*sin_psi*sin_lodeT;
+            const auto term2=sin_lodeT+isqrt3*sin_psi*cos_lodeT;
+            const auto denominator=18.*cos_3_lodeT*cos_3_lodeT*cos_3_lodeT;
+            const auto B=(sin_6_lodeT*term1-6.*cos_6_lodeT*term2)/denominator;
+            const auto C=(-cos_3_lodeT*term1-3.*sin_3_lodeT*term2)/denominator;
+            const auto A=-isqrt3*sin_psi*sin_lodeT-B*sin_3_lodeT
+                         -C*sin_3_lodeT*sin_3_lodeT+cos_lodeT;
+            const auto corner=A+B+C;
+            const auto positive_flow=sin_psi/3.+corner/(2.*sqrt3);
+            const auto negative_flow=sin_psi/3.-corner/sqrt3;
+            const auto negative_count=int(e0<0.)+int(e1<0.)+int(e2<0.);
+            if(negative_count==1 && negative_flow<0.)
+            {
+                const auto lambda=min(min(e0,e1),e2)/negative_flow;
+                const auto g0=e0-lambda*(e0<0. ? negative_flow : positive_flow);
+                const auto g1=e1-lambda*(e1<0. ? negative_flow : positive_flow);
+                const auto g2=e2-lambda*(e2<0. ? negative_flow : positive_flow);
+                // Rounding at a zero remainder is numerical, not a strength
+                // or yield tolerance. The negative-axis remainder is exact.
+                if((e0<0. || g0>=0.) && (e1<0. || g1>=0.) && (e2<0. || g2>=0.))
+                {
+                    apex_return=true;apex_lambda=lambda;
+                    apex_t0=e0<0. ? 0. : g0;
+                    apex_t1=e1<0. ? 0. : g1;
+                    apex_t2=e2<0. ? 0. : g2;
+                    apex_direction=(e-apex_t0*P0-apex_t1*P1-apex_t2*P2)/lambda;
+                }
+            }
+        }
+    }
+    // Nonzero cohesionless return in principal stress space. Homogeneity
+    // eliminates pressure through F=0; a bounded scalar Lode-angle root replaces
+    // the ill-conditioned coupled strain/multiplier Newton system. The old
+    // integrator remains the fallback if no admissible root is found.
+    if(!apex_return && c==0. && a==0. && ft==0. && sin_phi>0.)
+    {
+        const auto nu_iso=D(0,1)/(D(0,0)+D(0,1));
+        std::array<Stensor,3> const projectors{P0,P1,P2};
+        std::array<real,3> const ep{(S*trial)|P0,(S*trial)|P1,(S*trial)|P2};
+        std::array<unsigned,3> order{0,1,2};
+        std::sort(order.begin(),order.end(),[&](unsigned i,unsigned j){return ep[i]<ep[j];});
+        std::array<real,3> const e{ep[order[0]],ep[order[1]],ep[order[2]]};
+        const auto section=[&](real theta,real sine)
+        {
+            if(abs(theta)<lodeT)
+                return std::array<real,2>{cos(theta)-isqrt3*sine*sin(theta),-sin(theta)-isqrt3*sine*cos(theta)};
+            const real sign=theta<0.?-1.:1.;
+            const auto term1=cos_lodeT-isqrt3*sine*sin_lodeT;
+            const auto term2=sign*sin_lodeT+isqrt3*sine*cos_lodeT;
+            const auto denominator=18.*cos_3_lodeT*cos_3_lodeT*cos_3_lodeT;
+            const auto B=(sign*sin_6_lodeT*term1-6.*cos_6_lodeT*term2)/denominator;
+            const auto C=(-cos_3_lodeT*term1-3.*sign*sin_3_lodeT*term2)/denominator;
+            const auto A=-isqrt3*sine*sign*sin_lodeT-B*sign*sin_3_lodeT-C*sin_3_lodeT*sin_3_lodeT+cos_lodeT;
+            const auto st=sin(3.*theta);
+            return std::array<real,2>{A+B*st+C*st*st,3.*B*cos(3.*theta)+3.*C*sin(6.*theta)};
+        };
+        const auto evaluate=[&](real theta)
+        {
+            std::array<real,3> d{-2.*isqrt3*cos(theta-pi/6.),0.,2.*isqrt3*cos(theta+pi/6.)};d[1]=-d[0]-d[2];
+            std::array<real,3> dp{2.*isqrt3*sin(theta-pi/6.),0.,-2.*isqrt3*sin(theta+pi/6.)};dp[1]=-dp[0]-dp[2];
+            const auto kf=section(theta,sin_phi)[0];const auto kg=section(theta,sin_psi);
+            std::array<real,3> A{},n{};
+            for(unsigned i=0;i<3;++i)
+            {
+                A[i]=(1.+nu_iso)*d[i]-(1.-2.*nu_iso)*kf/sin_phi;
+                n[i]=sin_psi/3.+(kg[0]*d[i]+kg[1]*dp[i])/2.;
+            }
+            // In the planar central sector the principal potential gradient
+            // is exactly constant. Avoid cancelling trigonometric terms to
+            // obtain its identically zero middle component.
+            if(abs(theta)<lodeT)
+            { n[0]=(sin_psi-1.)/2.;n[1]=0.;n[2]=(sin_psi+1.)/2.; }
+            const real f=(A[1]*n[2]-A[2]*n[1])*e[0]+(A[2]*n[0]-A[0]*n[2])*e[1]+(A[0]*n[1]-A[1]*n[0])*e[2];
+            return std::tuple{f,d,A,n,kf};
+        };
+        const auto dev=deviator(trial);const auto qtrial=sqrt((dev|dev)/2.);
+        real trial_yield=sin_phi*trace(trial)/3.;
+        if(qtrial>0.)
+        {
+            const auto argument=min(max(-3.*sqrt3*det(dev)/(2.*qtrial*qtrial*qtrial),real(-1)),real(1));
+            trial_yield+=qtrial*section(asin(argument)/3.,sin_phi)[0];
+        }
+        real left=-pi/6.;auto fl=std::get<0>(evaluate(left));
+        for(unsigned segment=1;segment<=64 && !spectral_return && trial_yield>0.;++segment)
+        {
+            real right=-pi/6.+(pi/3.)*segment/64.;const auto fr=std::get<0>(evaluate(right));
+            if(fl*fr<=0.)
+            {
+                real lo=left,hi=right,flo=fl;
+                for(unsigned iteration=0;iteration<50;++iteration)
+                {
+                    const real mid=(lo+hi)/2.;const auto fm=std::get<0>(evaluate(mid));
+                    if(flo*fm<=0.) { hi=mid; } else { lo=mid;flo=fm; }
+                }
+                const auto [unused,d,A,n,kf]=evaluate((lo+hi)/2.);
+                real aa=0.,nn=0.,an=0.,ae=0.,ne=0.;
+                for(unsigned i=0;i<3;++i) { aa+=A[i]*A[i];nn+=n[i]*n[i];an+=A[i]*n[i];ae+=A[i]*e[i];ne+=n[i]*e[i]; }
+                const auto determinant=aa*nn-an*an;
+                if(determinant>0.)
+                {
+                    const auto r=(ae*nn-ne*an)/determinant;
+                    const auto lambda=(ne*aa-ae*an)/determinant;
+                    real error=0.;bool compressive=true;
+                    for(unsigned i=0;i<3;++i)
+                    { error=max(error,abs(r*A[i]+lambda*n[i]-e[i]));compressive=compressive && d[i]-kf/sin_phi<=0.; }
+                    if(r>0. && lambda>=0. && compressive && error<1.e-13)
+                    {
+                        spectral_return=true;spectral_lambda=lambda;
+                        for(unsigned i=0;i<3;++i)
+                        { spectral_elastic+=r*A[i]*projectors[order[i]];spectral_direction+=n[i]*projectors[order[i]]; }
+                    }
+                }
+            }
+            left=right;fl=fr;
+        }
+        // At the zero-stress apex the plastic potential is set-valued.
+        // Construct a verifiable nonnegative shear/Rankine decomposition rather
+        // than asking a singular Newton system to choose a direction at q=0.
+        // A nonzero admissible spectral return always takes precedence.
+        if(!spectral_return && e[0]<0. && e[2]>=0.)
+        {
+            const auto scale=max(max(abs(e[0]),abs(e[1])),abs(e[2]));
+            const auto tolerance=4096.*std::numeric_limits<real>::epsilon()*max(scale,real(1.e-30));
+            const auto middle=abs(e[1])<=tolerance ? real(0) : e[1];
+            const bool two_negative=middle<0.;
+            const auto residual=[&](real theta)
+            {
+                const auto n=std::get<3>(evaluate(theta));
+                return two_negative ? e[0]*n[1]-middle*n[0]
+                                    : middle*n[2]-e[2]*n[1];
+            };
+            real lo=two_negative ? -pi/6. : 0.;
+            real hi=two_negative ? 0. : pi/6.;
+            real flo=residual(lo);const auto fhi=residual(hi);
+            if(flo*fhi<=0.)
+            {
+                for(unsigned iteration=0;iteration<60;++iteration)
+                {
+                    const real mid=(lo+hi)/2.;const auto fm=residual(mid);
+                    if(flo*fm<=0.) { hi=mid; } else { lo=mid;flo=fm; }
+                }
+                const auto n=std::get<3>(evaluate((lo+hi)/2.));
+                const auto denominator=two_negative ? n[0] : n[2];
+                if(denominator!=0.)
+                {
+                    const auto lambda=(two_negative ? e[0] : e[2])/denominator;
+                    std::array<real,3> remainder{};bool admissible=lambda>=0.;
+                    for(unsigned i=0;i<3;++i)
+                    {
+                        const auto value=e[i]-lambda*n[i];
+                        admissible=admissible && value>=-tolerance;
+                        remainder[order[i]]=max(value,real(0));
+                    }
+                    if(admissible)
+                    {
+                        apex_return=true;apex_lambda=lambda;
+                        apex_t0=remainder[0];apex_t1=remainder[1];apex_t2=remainder[2];
+                        for(unsigned i=0;i<3;++i) { apex_direction+=n[i]*projectors[order[i]]; }
+                    }
+                }
+            }
+        }
+    }
+}
+@Predictor
+{
+    const auto scale = D(0,0)+2*D(0,1);
+    dlt0 = max(real(0),(trial0-ft)/scale);
+    dlt1 = max(real(0),(trial1-ft)/scale);
+    dlt2 = max(real(0),(trial2-ft)/scale);
+    deel = deto - dlt0*P0 - dlt1*P1 - dlt2*P2;
+    if(spectral_return)
+    { deel=spectral_elastic-eel;dlam=spectral_lambda;dlt0=0.;dlt1=0.;dlt2=0.; }
+    if(apex_return)
+    { deel=-eel;dlam=apex_lambda;dlt0=apex_t0;dlt1=apex_t1;dlt2=apex_t2; }
+}
+@Integrator
+{
+    constexpr auto sqrt3 = Cste<real>::sqrt3;
+    constexpr auto isqrt3 = Cste<real>::isqrt3;
+    constexpr auto id = Stensor::Id();
+    if (spectral_return)
+    {
+        feel=eel+deel-spectral_elastic;
+        flam=dlam-spectral_lambda;
+        flt0=dlt0;flt1=dlt1;flt2=dlt2;
+    }
+    else if (apex_return)
+    {
+        feel += dlam*apex_direction+dlt0*P0+dlt1*P1+dlt2*P2;
+        flam=dlam-apex_lambda;
+        flt0=dlt0-apex_t0;flt1=dlt1-apex_t1;flt2=dlt2-apex_t2;
+    }
+    else
+    {
+        const auto s = deviator(sig);
+        const auto I1 = trace(sig);
+        const auto physical_J2 = (s | s) / 2.;
+        const auto J2 = max(physical_J2, local_zero_tolerance);
+        const auto J3 = real(det(s) < 0. ? min(det(s), -local_zero_tolerance)
+                                         : max(det(s), local_zero_tolerance));
+        const auto arg = min(max(-3. * sqrt3 * J3 / (2. * J2 * sqrt(J2)),
+                                 -1. + local_zero_tolerance),
+                             1. - local_zero_tolerance);
+        const auto lode = 1. / 3. * asin(arg);
+        const auto cos_lode = cos(lode);
+        const auto sin_lode = sin(lode);
+        const auto cos_3_lode = cos(3. * lode);
+        const auto sin_6_lode = sin(6. * lode);
+        const auto cos_6_lode = cos(6. * lode);
+        const auto sin_3_lode = arg;
+        const auto tan_3_lode = tan(3. * lode);
+        auto K = 0.;
+        auto dK_dlode = 1.;
+        if (fabs(lode) < lodeT)
+        {
+            K = cos_lode - isqrt3 * sin_phi * sin_lode;
+            dK_dlode = -sin_lode - isqrt3 * sin_phi * cos_lode;
+        }
+        else
+        {
+            const auto sign =
+                min(max(lode / max(abs(lode), local_zero_tolerance), -1.), 1.);
+            const auto term1 = cos_lodeT - isqrt3 * sin_phi * sin_lodeT;
+            const auto term2 = sign * sin_lodeT + isqrt3 * sin_phi * cos_lodeT;
+            const auto term3 = 18. * cos_3_lodeT * cos_3_lodeT * cos_3_lodeT;
+
+            const auto B =
+                (sign * sin_6_lodeT * term1 - 6. * cos_6_lodeT * term2) / term3;
+            const auto C =
+                (-cos_3_lodeT * term1 - 3. * sign * sin_3_lodeT * term2) /
+                term3;
+
+            const auto A = -isqrt3 * sin_phi * sign * sin_lodeT -
+                           B * sign * sin_3_lodeT -
+                           C * sin_3_lodeT * sin_3_lodeT + cos_lodeT;
+            K = A + B * sin_3_lode + C * sin_3_lode * sin_3_lode;
+            dK_dlode = 3. * B * cos_3_lode + 3. * C * sin_6_lode;
+        }
+        auto KG = 0.0;  // move into a function to avoid code duplication
+        auto dKG_dlode = 1.;
+        auto dKG_ddlode = 1.;
+        if (fabs(lode) < lodeT)
+        {
+            KG = cos_lode - isqrt3 * sin_psi * sin_lode;
+            dKG_dlode = -sin_lode - isqrt3 * sin_psi * cos_lode;
+            dKG_ddlode = -cos_lode + isqrt3 * sin_psi * sin_lode;
+        }
+        else
+        {
+            const auto sign =
+                min(max(lode / max(fabs(lode), local_zero_tolerance), -1.), 1.);
+            const auto term1 = cos_lodeT - isqrt3 * sin_psi * sin_lodeT;
+            const auto term2 = sign * sin_lodeT + isqrt3 * sin_psi * cos_lodeT;
+            const auto term3 = 18. * cos_3_lodeT * cos_3_lodeT * cos_3_lodeT;
+
+            const auto B =
+                (sign * sin_6_lodeT * term1 - 6. * cos_6_lodeT * term2) / term3;
+            const auto C =
+                (-cos_3_lodeT * term1 - 3. * sign * sin_3_lodeT * term2) /
+                term3;
+
+            const auto A = -isqrt3 * sin_psi * sign * sin_lodeT -
+                           B * sign * sin_3_lodeT -
+                           C * sin_3_lodeT * sin_3_lodeT + cos_lodeT;
+            KG = A + B * sin_3_lode + C * sin_3_lode * sin_3_lode;
+            dKG_dlode = 3. * B * cos_3_lode + 3. * C * sin_6_lode;
+            dKG_ddlode = -9. * B * sin_3_lode + 18. * C * cos_6_lode;
+        }
+
+        // flow direction
+        const auto dev_s_squared = computeJ3Derivative(
+            sig);  // replaces dev_s_squared = deviator(square(s));
+        const auto dG_dI1 = sin_psi / 3.;
+        const auto root = max(sqrt(J2 * KG * KG + aG * aG * sin_psi * sin_psi),
+                              local_zero_tolerance);
+        const auto dG_dJ2 = KG / (2. * root) * (KG - tan_3_lode * dKG_dlode);
+        const auto dG_dJ3 = J2 * KG * tan_3_lode / (3. * J3 * root) * dKG_dlode;
+        const auto n = eval(dG_dI1 * id + dG_dJ2 * s + dG_dJ3 * dev_s_squared);
+        if (this->iter > 30 && abs(n | np) < sqrt(n | n) * sqrt(np | np) * 0.99)
+        {
+            return false;
+        }
+        // yield function
+        // The invariant floor stabilises derivatives, not the yield value.
+        // In particular c=a=0, sig=0 lies exactly on the physical MC apex.
+        const auto rootF = sqrt(physical_J2 * K * K + a * a * sin_phi * sin_phi);
+        const auto Fy = I1 * sin_phi / 3 + rootF - c * cos_phi;
+        // Complementarity permits shear unloading when the tensile return
+        // brings a shear-violating elastic trial back inside the MC surface.
+        feel += dlam * n;
+        flam = min(dlam, -Fy / D(0,0));
+        feel += dlt0*P0 + dlt1*P1 + dlt2*P2;
+        flt0 = min(dlt0, (ft - (sig|P0))/D(0,0));
+        flt1 = min(dlt1, (ft - (sig|P1))/D(0,0));
+        flt2 = min(dlt2, (ft - (sig|P2))/D(0,0));
+    }
+}
+@UpdateAuxiliaryStateVariables
+{
+    et += dlt0*P0 + dlt1*P1 + dlt2*P2;
+}

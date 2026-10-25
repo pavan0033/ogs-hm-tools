@@ -1,0 +1,74 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "DeactivatedSubdomain.h"
+
+#include <range/v3/algorithm/contains.hpp>
+
+#include "BaseLib/Error.h"
+#include "MeshLib/Elements/Element.h"
+#include "MeshLib/Node.h"
+#include "NumLib/TimeStepping/TimeInterval.h"
+#include "ParameterLib/Parameter.h"
+
+namespace ProcessLib
+{
+const std::string DeactivatedSubdomain::zero_parameter_name =
+    "zero_for_element_deactivation_approach";
+
+bool isTimeInSupportInterval(
+    MathLib::PiecewiseLinearInterpolation const& deactivation_curve,
+    double const t)
+{
+    return NumLib::TimeInterval{deactivation_curve.getSupportMin(),
+                                deactivation_curve.getSupportMax()}
+        .contains(t);
+}
+
+bool DeactivatedSubdomain::isDeactivated(MeshLib::Element const& element,
+                                         double const time) const
+{
+    auto const& bulk_element_ids = deactivated_subdomain_mesh.bulk_element_ids;
+    if (!bulk_element_ids.contains(element.getID()))
+    {
+        return false;
+    }
+
+    if (line_segment)
+    {
+        auto const& element_center = getCenterOfGravity(element);
+        // Line from a to b.
+        auto const& a = line_segment->first;
+        auto const& b = line_segment->second;
+        // Tangent vector t = (b - a)/|b - a|.
+        Eigen::Vector3d const t = (b - a).normalized();
+
+        // Position r on the line at given time.
+        auto const curve_position = time_interval.getValue(time);
+        Eigen::Vector3d const r = a + t * curve_position;
+
+        // Return true if p is "behind" the plane through r.
+        return (element_center.asEigenVector3d() - r).dot(t) <= 0;
+    }
+
+    if (ball)
+    {
+        auto const& element_center = getCenterOfGravity(element);
+
+        auto const& center = ball->center;
+        // The radius at given time.
+        auto const r_t = time_interval.getValue(time);
+        if (r_t > ball->radius)
+        {
+            return false;
+        }
+
+        double const r_element_center =
+            (element_center.asEigenVector3d() - center).norm();
+
+        return r_element_center < r_t;
+    }
+
+    return true;
+}
+}  // namespace ProcessLib

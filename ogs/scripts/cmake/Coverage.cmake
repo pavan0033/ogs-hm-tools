@@ -1,0 +1,50 @@
+if(NOT (OGS_COVERAGE AND PROJECT_IS_TOP_LEVEL))
+    return()
+endif()
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG
+           " -g -Og --coverage -fprofile-update=atomic -U_GLIBCXX_DEBUG"
+    )
+    set(EIGEN_NO_DEBUG ON CACHE BOOL "" FORCE)
+    set(EIGEN_DONT_VECTORIZE OFF CACHE BOOL "" FORCE)
+    set(OGS_EIGEN_INITIALIZE_MATRICES_BY_NAN OFF CACHE BOOL "" FORCE)
+    set(OGS_EIGEN_DYNAMIC_SHAPE_MATRICES "OFF" CACHE STRING "" FORCE)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fprofile-abs-path")
+    endif()
+    set(CMAKE_EXE_LINKER_FLAGS_DEBUG "--coverage")
+    set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "--coverage")
+    set(CMAKE_MODULE_LINKER_FLAGS_DEBUG "--coverage")
+else()
+    message(FATAL_ERROR "OGS_COVERAGE requires clang or gcc compiler!")
+endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    execute_process(
+        COMMAND xcrun --find gcov OUTPUT_VARIABLE GCOV_EXECUTABLE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    find_program(LLVM_COV_EXECUTABLE llvm-cov REQUIRED)
+    file(CREATE_LINK ${LLVM_COV_EXECUTABLE} ${CMAKE_BINARY_DIR}/gcov SYMBOLIC)
+    set(GCOV_EXECUTABLE "${LLVM_COV_EXECUTABLE} gcov")
+else() # Assuming gcc
+    find_program(GCOV_EXECUTABLE gcov REQUIRED)
+endif()
+configure_file(scripts/cmake/gcovr.cfg.in gcovr.cfg @ONLY)
+
+set(GCOVR_CMD uvx gcovr==8.6 CACHE STRING "" FORCE)
+
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/coverage/html)
+
+add_custom_target(
+    process_coverage
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running gcovr to process coverage results"
+    COMMAND ${GCOVR_CMD} --config gcovr.cfg .
+)
+
+if(UNIX)
+    add_custom_target(clean_coverage find . -name '*.gcda' -delete)
+endif()

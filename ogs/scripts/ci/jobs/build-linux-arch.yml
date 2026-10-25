@@ -1,0 +1,121 @@
+.common-linux-arch-base: &common-linux-arch-base
+  extends:
+    - .template-build-linux
+    - .test-artifacts
+  needs: [meta]
+  timeout: 3h
+
+# Rules for OGS_COVERAGE_PYTHON=OFF
+.common-arch-cpp-rules: &common-arch-cpp-rules
+  - if: '$CI_MERGE_REQUEST_LABELS =~ /.*ci::coverage only?($|,)/'
+    when: never
+  # 'build linux arch' is not skipped for these labels because 'preview web
+  # site' needs the web content and the feature_matrix target it generates.
+  # Its test suite is reduced to the notebook tests.
+  - if: '$CI_MERGE_REQUEST_LABELS =~ /.*ci::(web|petsc) only?($|,)/'
+    variables:
+      CTEST_ARGS: "-R nb-"
+  - when: on_success
+
+# Rules for the PETSc job with OGS_COVERAGE_PYTHON=OFF
+.common-petsc-cpp-rules: &common-petsc-cpp-rules
+  - if: '$CI_MERGE_REQUEST_LABELS =~ /.*ci::coverage only?($|,)/'
+    when: never
+  - if: '$CI_MERGE_REQUEST_LABELS =~ /.*ci::web only?($|,)/'
+    variables:
+      CTEST_ARGS: "-R nb-"
+  - when: on_success
+
+# Rules for the PETSc job with OGS_COVERAGE_PYTHON=ON
+.common-petsc-python-rules: &common-petsc-python-rules
+  - if: '$CI_MERGE_REQUEST_LABELS =~ /.*ci::web only?($|,)/'
+    when: never
+  - when: on_success
+
+# Rules for OGS_COVERAGE_PYTHON=ON
+.common-arch-python-rules: &common-arch-python-rules
+  - if: '$CI_MERGE_REQUEST_LABELS =~ /.*ci::(web|petsc) only?($|,)/'
+    when: never
+  - when: on_success
+
+.common-linux-arch-before-script: &common-linux-arch-before-script
+  - source /opt/intel/oneapi/setvars.sh
+
+# ============================================================
+# Serial, separate job for python coverage necessary
+# ============================================================
+
+build linux arch:
+  <<: *common-linux-arch-base
+  tags: [shell, envinf]
+  rules: *common-arch-cpp-rules
+  variables:
+    CMAKE_PRESET: release-all
+    CMAKE_ARGS: "-DOGS_USE_MKL=ON -DOGS_USE_NETCDF=ON"
+    ADDITIONAL_TARGETS_PRE: "check-headers"
+    ADDITIONAL_TARGETS_POST: "feature_matrix"
+    BUILD_CTEST_LARGE_ON_MASTER: "true"
+  before_script: *common-linux-arch-before-script
+  allow_failure:
+    # Triggered by feature matrix feature_coverage
+    exit_codes: 123
+
+build linux arch (py-cov):
+  <<: *common-linux-arch-base
+  tags: [shell, envinf]
+  rules: *common-arch-python-rules
+  variables:
+    CMAKE_PRESET: release-all
+    CMAKE_ARGS: "-DOGS_USE_MKL=ON -DOGS_USE_NETCDF=ON -DOGS_COVERAGE_PYTHON=ON"
+    ADDITIONAL_TARGETS_POST: "process_coverage_python"
+    CTEST_ARGS: "-R nb-|pytest"
+    BUILD_CTEST_LARGE_ON_MASTER: "true"
+  before_script: *common-linux-arch-before-script
+
+# ============================================================
+# PETSc, separate job for python coverage necessary
+# ============================================================
+
+build linux petsc:
+  <<: *common-linux-arch-base
+  tags: [envinf, shell, petsc]
+  rules: *common-petsc-cpp-rules
+  variables:
+    CMAKE_PRESET: release-petsc-all
+    ADDITIONAL_TARGETS_PRE: "check-headers"
+    ADDITIONAL_TARGETS_POST: ""
+    BUILD_CTEST_LARGE_ON_MASTER: "true"
+
+build linux petsc (py-cov):
+  <<: *common-linux-arch-base
+  tags: [envinf, shell, petsc]
+  rules: *common-petsc-python-rules
+  variables:
+    CMAKE_PRESET: release-petsc-all
+    CMAKE_ARGS: "-DOGS_COVERAGE_PYTHON=ON"
+    ADDITIONAL_TARGETS_POST: "process_coverage_python"
+    CTEST_ARGS: "-R nb-|pytest"
+    BUILD_CTEST_LARGE_ON_MASTER: "true"
+
+build linux petsc ext:
+  <<: *common-linux-arch-base
+  tags: [envinf, shell]
+  rules: *common-petsc-cpp-rules
+  variables:
+    CMAKE_PRESET: release-petsc-full-all
+    CTEST_ARGS: "-L petsc-mumps"
+
+# ============================================================
+# LIS
+# ============================================================
+build linux arch lis:
+  <<: *common-linux-arch-base
+  tags: [shell, envinf]
+  rules:
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /.*ci::(web|coverage|petsc) only?($|,)/'
+      when: never
+    - when: on_success
+  variables:
+    CMAKE_PRESET: release-all
+    CMAKE_ARGS: "-DOGS_USE_LIS=ON"
+    BUILD_CTEST_LARGE_ON_MASTER: "true"

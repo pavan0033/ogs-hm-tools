@@ -1,0 +1,120 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "GeoLib/Raster.h"
+#include "MeshLib/MeshEnums.h"
+#include "MeshLib/Properties.h"
+
+class vtkImageData;  // For conversion from Image to QuadMesh
+
+namespace MeshLib
+{
+
+class Mesh;
+class Node;
+class Element;
+template <typename T>
+class PropertyVector;
+}  // namespace MeshLib
+
+namespace MeshToolsLib
+{
+
+/**
+ * \brief Converts raster data into an OGS mesh.
+ */
+class RasterToMesh
+{
+public:
+    /**
+     * Converts greyscale raster into a mesh.
+     * \param raster         input raster.
+     * \param elem_type      defines if elements of the new mesh should be
+     *                       triangles or quads (or hexes for 3D).
+     * \param intensity_type defines how image intensities are interpreted.
+     * \param array_name     mesh property name, defaults to "Colour" if not
+     *                       given.
+     */
+    static std::unique_ptr<MeshLib::Mesh> convert(
+        GeoLib::Raster const& raster,
+        MeshLib::MeshElemType elem_type,
+        MeshLib::UseIntensityAs intensity_type,
+        std::string const& array_name = "Colour");
+
+    /**
+     * Converts a vtkImageData into a mesh.
+     * \param img            input image.
+     * \param origin         coordinates of image's origin, lower left corner.
+     * \param scalingFactor  edge length of each pixel
+     * \param elem_type      defines if elements of the new mesh should be
+     *                       triangles or quads (or hexes for 3D).
+     * \param intensity_type defines how image intensities are interpreted.
+     * \param array_name     mesh property name, defaults to "Colour" if not
+     *                       given.
+     */
+    static std::unique_ptr<MeshLib::Mesh> convert(
+        vtkImageData* img,
+        const double origin[3],
+        const double scalingFactor,
+        MeshLib::MeshElemType elem_type,
+        MeshLib::UseIntensityAs intensity_type,
+        std::string const& array_name = "Colour");
+
+    /**
+     * Converts double array with raster values into a mesh.
+     * \param img            input image.
+     * \param header         raster header information.
+     * \param elem_type      defines if elements of the new mesh should be
+     *                       triangles or quads (or hexes for 3D).
+     * \param intensity_type defines how image intensities are interpreted.
+     * \param array_name     mesh property name, defaults to "Colour" if not
+     *                       given.
+     */
+    static std::unique_ptr<MeshLib::Mesh> convert(
+        const double* const img,
+        GeoLib::RasterHeader const& header,
+        MeshLib::MeshElemType elem_type,
+        MeshLib::UseIntensityAs intensity_type,
+        std::string const& array_name = "Colour");
+
+private:
+    template <typename T>
+    static void fillPropertyVector(MeshLib::PropertyVector<T>& prop_vec,
+                                   double const* const img,
+                                   GeoLib::RasterHeader const& header,
+                                   MeshLib::MeshElemType elem_type)
+    {
+        // each pixel is represented by two cells for triangles and prisms
+        bool const two_elements_per_cell =
+            (elem_type == MeshLib::MeshElemType::TRIANGLE) ||
+            (elem_type == MeshLib::MeshElemType::PRISM);
+        std::size_t const elements_per_cell = two_elements_per_cell ? 2 : 1;
+
+        // The iterator is filled below without growing prop_vec again.
+        auto out = MeshLib::extend(
+            prop_vec,
+            header.n_depth * header.n_cols * header.n_rows * elements_per_cell);
+
+        for (std::size_t k = 0; k < header.n_depth; k++)
+        {
+            std::size_t const layer_idx = (k * header.n_rows * header.n_cols);
+            for (std::size_t i = 0; i < header.n_cols; i++)
+            {
+                std::size_t idx(i * header.n_rows + layer_idx);
+                for (std::size_t j = 0; j < header.n_rows; j++)
+                {
+                    auto val(static_cast<T>(img[idx + j]));
+                    *out++ = val;
+                    if (two_elements_per_cell)
+                    {
+                        *out++ = val;
+                    }
+                }
+            }
+        }
+    }
+};
+
+}  // namespace MeshToolsLib

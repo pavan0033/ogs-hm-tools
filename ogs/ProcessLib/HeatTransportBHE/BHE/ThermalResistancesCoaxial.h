@@ -1,0 +1,90 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <cmath>
+#include <numbers>
+
+#include "GroutParameters.h"
+#include "Pipe.h"
+#include "RefrigerantProperties.h"
+#include "ThermalResistanceHelpers.h"
+
+namespace ProcessLib
+{
+namespace HeatTransportBHE
+{
+namespace BHE
+{
+struct AdvectiveThermalResistanceCoaxial
+{
+    double const inner_pipe_coaxial;
+    double const a_annulus;
+    double const b_annulus;
+};
+
+struct PipeWallThermalResistanceCoaxial
+{
+    double const inner_pipe_coaxial;
+    double const annulus;
+};
+
+struct GroutAndGroutSoilExchangeThermalResistanceCoaxial
+{
+    double const conductive_b;
+    double const grout_soil;
+};
+
+inline AdvectiveThermalResistanceCoaxial calculateAdvectiveThermalResistance(
+    Pipe const& inner_pipe, Pipe const& outer_pipe,
+    RefrigerantProperties const& fluid, double const Nu_inner_pipe,
+    double const Nu_annulus)
+{
+    double const hydraulic_diameter =
+        coaxialPipesAnnulusDiameter(inner_pipe, outer_pipe);
+
+    auto advective_thermal_resistance = [&](double Nu, double diameter_ratio)
+    {
+        return 1.0 / (Nu * fluid.thermal_conductivity * std::numbers::pi) *
+               diameter_ratio;
+    };
+    return {advective_thermal_resistance(Nu_inner_pipe, 1.),
+            advective_thermal_resistance(
+                Nu_annulus, hydraulic_diameter / inner_pipe.outsideDiameter()),
+            advective_thermal_resistance(
+                Nu_annulus, hydraulic_diameter / outer_pipe.diameter)};
+}
+
+/// Compute pipe wall thermal resistance from pipe geometry and pre-evaluated
+/// wall thermal conductivity values.
+inline PipeWallThermalResistanceCoaxial calculatePipeWallThermalResistance(
+    Pipe const& inner_pipe, double const lambda_p_inner, Pipe const& outer_pipe,
+    double const lambda_p_outer)
+{
+    return {pipeWallThermalResistance(inner_pipe, lambda_p_inner),
+            pipeWallThermalResistance(outer_pipe, lambda_p_outer)};
+}
+
+inline GroutAndGroutSoilExchangeThermalResistanceCoaxial
+calculateGroutAndGroutSoilExchangeThermalResistance(
+    Pipe const& outer_pipe, GroutParameters const& grout_parameters,
+    double const borehole_diameter)
+{
+    double const outer_pipe_outside_diameter = outer_pipe.outsideDiameter();
+    double const chi =
+        std::log(std::sqrt(borehole_diameter * borehole_diameter +
+                           outer_pipe_outside_diameter *
+                               outer_pipe_outside_diameter) /
+                 std::sqrt(2) / outer_pipe_outside_diameter) /
+        std::log(borehole_diameter / outer_pipe_outside_diameter);
+    double const R_g =
+        std::log(borehole_diameter / outer_pipe_outside_diameter) / 2 /
+        (std::numbers::pi * grout_parameters.lambda_g);
+    double const conductive_b = chi * R_g;
+    double const grout_soil = (1 - chi) * R_g;
+    return {conductive_b, grout_soil};
+}
+}  // namespace BHE
+}  // namespace HeatTransportBHE
+}  // namespace ProcessLib

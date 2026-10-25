@@ -1,0 +1,119 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <tclap/CmdLine.h>
+
+#include "BaseLib/Logging.h"
+#include "BaseLib/MPI.h"
+#include "BaseLib/TCLAPArguments.h"
+#include "GeoLib/GEOObjects.h"
+#include "GeoLib/IO/XmlIO/Boost/BoostXmlGmlInterface.h"
+#include "InfoLib/GitInfo.h"
+#include "MeshGeoToolsLib/ConstructMeshesFromGeometries.h"
+#include "MeshGeoToolsLib/SearchLength.h"
+#include "MeshLib/IO/readMeshFromFile.h"
+#include "MeshLib/IO/writeMeshToFile.h"
+#include "MeshLib/Mesh.h"
+
+std::unique_ptr<GeoLib::GEOObjects> readGeometry(std::string const& filename)
+{
+    auto geo_objects = std::make_unique<GeoLib::GEOObjects>();
+    GeoLib::IO::BoostXmlGmlInterface gml_reader(*geo_objects);
+
+    DBUG("Reading geometry file '{:s}'.", filename);
+    gml_reader.readFile(filename);
+    return geo_objects;
+}
+
+int main(int argc, char* argv[])
+{
+    TCLAP::CmdLine cmd(
+        "Converts a geometry defined on a given mesh to distinct meshes. The "
+        "documentation is available at "
+        "https://www.opengeosys.org/docs/tools/meshing-submeshes/"
+        "constructmeshesfromgeometry/.\n\n"
+        "OpenGeoSys-6 software, version " +
+            GitInfoLib::GitInfo::ogs_version +
+            ".\n"
+            "Copyright (c) 2012-2026, OpenGeoSys Community "
+            "(http://www.opengeosys.org)",
+        ' ', GitInfoLib::GitInfo::ogs_version);
+
+    TCLAP::ValueArg<double> search_length_arg(
+        "s",
+        "searchlength",
+        "search length determining radius for the node search algorithm. "
+        "Non-negative floating point number, (min = 0)",
+        false,
+        1e-16,
+        "float");
+    cmd.add(search_length_arg);
+
+    TCLAP::ValueArg<std::string> geometry_arg(
+        "g",
+        "geometry",
+        "Input (.gml | .gli). The file name of the input geometry",
+        true,
+        "",
+        "INPUT_FILE");
+    cmd.add(geometry_arg);
+
+    TCLAP::ValueArg<std::string> mesh_arg(
+        "m",
+        "mesh",
+        "Input (.vtu). "
+        "The file name of the input mesh where the geometry is defined",
+        true,
+        "",
+        "INPUT_FILE");
+    cmd.add(mesh_arg);
+
+    TCLAP::SwitchArg multiple_nodes_allowed_arg(
+        "", "multiple-nodes-allowed",
+        "Allows multiple mesh nodes in eps environment.");
+    cmd.add(multiple_nodes_allowed_arg);
+
+    auto log_level_arg = BaseLib::makeLogLevelArg();
+    cmd.add(log_level_arg);
+    cmd.parse(argc, argv);
+
+    BaseLib::MPI::Setup mpi_setup(argc, argv);
+    BaseLib::initOGSLogger(log_level_arg.getValue());
+
+    std::unique_ptr<MeshLib::Mesh> mesh{
+        MeshLib::IO::readMeshFromFile(mesh_arg.getValue())};
+
+    auto const geo_objects = readGeometry(geometry_arg.getValue());
+
+    double const search_length = search_length_arg.getValue();
+
+    auto const extracted_meshes = constructAdditionalMeshesFromGeoObjects(
+        *geo_objects,
+        *mesh,
+        std::make_unique<MeshGeoToolsLib::SearchLength>(search_length),
+        multiple_nodes_allowed_arg.getValue());
+
+    for (auto const& m_ptr : extracted_meshes)
+    {
+        if (!m_ptr)
+        {
+            ERR("Could not create a mesh for each given geometry.");
+            return EXIT_FAILURE;
+        }
+        if (m_ptr->getNodes().empty())
+        {
+            WARN(
+                "The created mesh '{:s}' hasn't any nodes or elements and thus "
+                "it isn't written to file.",
+                m_ptr->getName());
+            continue;
+        }
+        if (MeshLib::IO::writeMeshToFile(*m_ptr, m_ptr->getName() + ".vtu") !=
+            0)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+
+    return EXIT_SUCCESS;
+}

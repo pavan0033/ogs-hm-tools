@@ -1,0 +1,13 @@
+# This contains multi-process notebooks
+if(TARGET ThermoHydroMechanics
+   AND TARGET ThermoRichardsMechanics
+   AND TARGET TH2M
+   AND NOT (OGS_USE_PETSC OR OGS_USE_LIS)
+)
+    NotebookTest(
+        NOTEBOOKFILE
+        ThermoHydroMechanics/Linear/Point_injection/SaturatedPointheatsource.py
+        RUNTIME 175
+        PROPERTIES PROCESSORS 4
+    )
+endif()

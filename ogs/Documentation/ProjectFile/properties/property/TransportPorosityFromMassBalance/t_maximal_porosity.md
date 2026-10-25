@@ -1,0 +1,1 @@
+\copydoc MaterialPropertyLib::TransportPorosityFromMassBalance::phi_max_

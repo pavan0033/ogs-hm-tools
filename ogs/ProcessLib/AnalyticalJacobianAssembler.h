@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "AbstractJacobianAssembler.h"
+
+namespace BaseLib
+{
+class ConfigTree;
+}
+
+namespace ProcessLib
+{
+
+//! Assembles the Jacobian matrix using a provided "analytical" method from the
+//! local assembler.
+class AnalyticalJacobianAssembler final : public AbstractJacobianAssembler
+{
+public:
+    //! Assembles the Jacobian, the matrices \f$M\f$ and \f$K\f$, and the vector
+    //! \f$b\f$.
+    //! In this implementation the call is only forwarded to the respective
+    //! method of the given \c local_assembler.
+    void assembleWithJacobian(std::size_t const mesh_item_id,
+                              LocalAssemblerInterface& local_assembler,
+                              double const t, double const dt,
+                              std::vector<double> const& local_x,
+                              std::vector<double> const& local_x_prev,
+                              std::vector<double>& local_b_data,
+                              std::vector<double>& local_Jac_data) override;
+
+    void assembleWithJacobianForStaggeredScheme(
+        LocalAssemblerInterface& local_assembler, double const t,
+        double const dt, Eigen::VectorXd const& local_x,
+        Eigen::VectorXd const& local_x_prev, int const process_id,
+        std::vector<double>& local_b_data,
+        std::vector<double>& local_Jac_data) override;
+
+    std::unique_ptr<AbstractJacobianAssembler> copy() const override;
+
+    void checkPerturbationSize(
+        int const /*max_non_deformation_dofs_per_node*/) const override
+    {
+    }
+
+    void setNonDeformationComponentIDs(
+        std::vector<int> const& /*non_deformation_component_ids*/) override
+    {
+    }
+
+    void setNonDeformationComponentIDsNoSizeCheck(
+        std::vector<int> const& /*non_deformation_component_ids*/) override
+    {
+    }
+
+    bool needsPicardAssembly() const override { return false; }
+};
+
+}  // namespace ProcessLib

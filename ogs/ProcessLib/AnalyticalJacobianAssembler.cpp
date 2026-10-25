@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "AnalyticalJacobianAssembler.h"
+
+#include "LocalAssemblerInterface.h"
+
+namespace ProcessLib
+{
+void AnalyticalJacobianAssembler::assembleWithJacobian(
+    std::size_t const /*mesh_item_id*/,
+    LocalAssemblerInterface& local_assembler, double const t, double const dt,
+    std::vector<double> const& local_x, std::vector<double> const& local_x_prev,
+    std::vector<double>& local_b_data, std::vector<double>& local_Jac_data)
+{
+    local_assembler.assembleWithJacobian(t, dt, local_x, local_x_prev,
+                                         local_b_data, local_Jac_data);
+}
+
+void AnalyticalJacobianAssembler::assembleWithJacobianForStaggeredScheme(
+    LocalAssemblerInterface& local_assembler, double const t, double const dt,
+    Eigen::VectorXd const& local_x, Eigen::VectorXd const& local_x_prev,
+    int const process_id, std::vector<double>& local_b_data,
+    std::vector<double>& local_Jac_data)
+{
+    local_assembler.assembleWithJacobianForStaggeredScheme(
+        t, dt, local_x, local_x_prev, process_id, local_b_data, local_Jac_data);
+}
+
+std::unique_ptr<AbstractJacobianAssembler> AnalyticalJacobianAssembler::copy()
+    const
+{
+    return std::make_unique<AnalyticalJacobianAssembler>(*this);
+}
+
+}  // namespace ProcessLib

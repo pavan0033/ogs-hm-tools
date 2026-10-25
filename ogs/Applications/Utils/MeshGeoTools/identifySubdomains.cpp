@@ -1,0 +1,172 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <tclap/CmdLine.h>
+
+#include "BaseLib/Logging.h"
+#include "BaseLib/MPI.h"
+#include "BaseLib/RunTime.h"
+#include "BaseLib/TCLAPArguments.h"
+#include "InfoLib/GitInfo.h"
+#include "MeshGeoToolsLib/IdentifySubdomainMesh.h"
+#include "MeshGeoToolsLib/MeshNodeSearcher.h"
+#include "MeshGeoToolsLib/SearchLength.h"
+#include "MeshLib/IO/readMeshFromFile.h"
+#include "MeshLib/IO/writeMeshToFile.h"
+#include "MeshLib/Mesh.h"
+
+std::vector<std::unique_ptr<MeshLib::Mesh>> readMeshes(
+    std::vector<std::string> const& filenames)
+{
+    std::vector<std::unique_ptr<MeshLib::Mesh>> meshes;
+    meshes.reserve(filenames.size());
+
+    for (auto const& filename : filenames)
+    {
+        auto mesh = MeshLib::IO::readMeshFromFile(filename);
+        if (mesh == nullptr)
+        {
+            OGS_FATAL("Could not read mesh from '{:s}' file.", filename);
+        }
+        meshes.emplace_back(mesh);
+    }
+    if (meshes.empty())
+    {
+        OGS_FATAL("No subdomain meshes were read.");
+    }
+    return meshes;
+}
+
+int main(int argc, char* argv[])
+{
+    TCLAP::CmdLine cmd(
+        "Checks if the subdomain meshes are part of the bulk mesh and writes "
+        "the 'bulk_node_ids' and the 'bulk_element_ids' in each of them. The "
+        "documentation is available at "
+        "https://www.opengeosys.org/docs/tools/meshing-submeshes/"
+        "identifysubdomains/.\n\n"
+        "OpenGeoSys-6 software, version " +
+            GitInfoLib::GitInfo::ogs_version +
+            ".\n"
+            "Copyright (c) 2012-2026, OpenGeoSys Community "
+            "(http://www.opengeosys.org)",
+        ' ', GitInfoLib::GitInfo::ogs_version);
+
+    TCLAP::SwitchArg force_overwrite_arg(
+        "f", "force", "Overwriting existing subdomain meshes.");
+    cmd.add(force_overwrite_arg);
+
+    TCLAP::ValueArg<std::string> output_prefix_arg(
+        "o",
+        "output_prefix",
+        "Output (.vtu). Prefix the subdomain meshes' filenames with the output "
+        "prefix/path.",
+        false,
+        "",
+        "BASE_FILENAME_OUTPUT");
+    cmd.add(output_prefix_arg);
+
+    TCLAP::ValueArg<double> search_length_arg(
+        "s",
+        "searchlength",
+        "search length determining radius for the node search algorithm. "
+        "Non-negative floating point number (min = 0) ",
+        false,
+        1e-16,
+        "SEARCH_LENGTH");
+    cmd.add(search_length_arg);
+
+    TCLAP::ValueArg<std::string> bulk_mesh_arg(
+        "m", "mesh", "Input (.vtu). The file name of the bulk mesh", true, "",
+        "INPUT_FILE");
+    cmd.add(bulk_mesh_arg);
+
+    // All the remaining arguments are used as file names for boundary/subdomain
+    // meshes.
+    TCLAP::UnlabeledMultiArg<std::string> subdomain_meshes_filenames_arg(
+        "subdomain_meshes_filenames", "mesh file names.", true,
+        "SUBDOMAIN_NAME");
+    cmd.add(subdomain_meshes_filenames_arg);
+    auto log_level_arg = BaseLib::makeLogLevelArg();
+    cmd.add(log_level_arg);
+    cmd.parse(argc, argv);
+
+    BaseLib::MPI::Setup mpi_setup(argc, argv);
+    BaseLib::initOGSLogger(log_level_arg.getValue());
+
+    // Started only here: with PETSc RunTime uses MPI_Wtime(), which is
+    // undefined before MPI_Init() and on macOS returns a value from a
+    // different epoch than the post-init clock, yielding a negative elapsed
+    // time.
+    BaseLib::RunTime run_time;
+    run_time.start();
+
+    //
+    // The bulk mesh.
+    //
+    BaseLib::RunTime mesh_reading_time;
+    mesh_reading_time.start();
+    std::unique_ptr<MeshLib::Mesh> bulk_mesh{
+        MeshLib::IO::readMeshFromFile(bulk_mesh_arg.getValue())};
+    if (bulk_mesh == nullptr)
+    {
+        OGS_FATAL("Could not read bulk mesh from '{:s}'",
+                  bulk_mesh_arg.getValue());
+    }
+
+    //
+    // Read the subdomain meshes.
+    //
+    auto const subdomain_meshes =
+        readMeshes(subdomain_meshes_filenames_arg.getValue());
+    INFO("Mesh reading time: {:g} s", mesh_reading_time.elapsed());
+
+    //
+    // Bulk mesh node searcher.
+    //
+    BaseLib::RunTime mesh_node_searcher_construction_time;
+    mesh_node_searcher_construction_time.start();
+    auto const& mesh_node_searcher =
+        MeshGeoToolsLib::MeshNodeSearcher::getMeshNodeSearcher(
+            *bulk_mesh,
+            std::make_unique<MeshGeoToolsLib::SearchLength>(
+                search_length_arg.getValue()));
+    INFO("MeshNodeSearcher construction time: {:g} s",
+         mesh_node_searcher_construction_time.elapsed());
+
+    //
+    // Identify the subdomains in the bulk mesh.
+    //
+    BaseLib::RunTime identify_subdomain_time;
+    identify_subdomain_time.start();
+    for (auto& mesh_ptr : subdomain_meshes)
+    {
+        // If force overwrite is set or the output is to different mesh than
+        // the input mesh.
+        bool const overwrite_property_vectors =
+            force_overwrite_arg.getValue() ||
+            !output_prefix_arg.getValue().empty();
+        identifySubdomainMesh(*mesh_ptr, *bulk_mesh, mesh_node_searcher,
+                              overwrite_property_vectors);
+    }
+    INFO("identifySubdomains time: {:g} s", identify_subdomain_time.elapsed());
+
+    //
+    // Output after the successful subdomain mesh identification.
+    //
+    BaseLib::RunTime writing_time;
+    writing_time.start();
+    for (auto const& mesh_ptr : subdomain_meshes)
+    {
+        if (MeshLib::IO::writeMeshToFile(*mesh_ptr,
+                                         output_prefix_arg.getValue() +
+                                             mesh_ptr->getName() + ".vtu") != 0)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+    INFO("writing time: {:g} s", writing_time.elapsed());
+
+    INFO("Entire run time: {:g} s", run_time.elapsed());
+    return EXIT_SUCCESS;
+}

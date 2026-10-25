@@ -1,0 +1,74 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <Eigen/Core>
+#include <memory>
+#include <utility>
+
+#include "MaterialLib/MPL/MaterialSpatialDistributionMap.h"
+#include "NumLib/NumericalStability/NumericalStabilization.h"
+#include "ParameterLib/Parameter.h"
+#include "ProcessLib/Common/HydroMechanics/InitialStress.h"
+
+namespace MaterialLib
+{
+namespace Solids
+{
+template <int DisplacementDim>
+struct MechanicsBase;
+}
+}  // namespace MaterialLib
+namespace ProcessLib
+{
+namespace ThermoHydroMechanics
+{
+template <int DisplacementDim>
+struct ThermoHydroMechanicsProcessData
+{
+    MeshLib::PropertyVector<int> const* const material_ids = nullptr;
+
+    MaterialPropertyLib::MaterialSpatialDistributionMap media_map;
+
+    /// The constitutive relation for the mechanical part.
+    std::map<int, std::shared_ptr<
+                      MaterialLib::Solids::MechanicsBase<DisplacementDim>>>
+        solid_materials;
+
+    /// The constitutive relation for the mechanical part of ice. When no
+    /// freezing is configured, this is a nullptr.
+    std::shared_ptr<MaterialLib::Solids::MechanicsBase<DisplacementDim>>
+        ice_constitutive_relation;
+
+    /// This indicates whether the governing equation is a volume balance or a
+    /// mass balance. Its value can be `volume` or `mass`. If it is set to
+    /// `volume`, note that the phase density must be constant, and the unit of
+    /// the Neumann boundary condition for the fluid phase is m/s. Otherwise,
+    /// the unit of the Neumann boundary condition is kg/m^3*m/s = kg/m^2/s.
+    /// Default value is `volume`.
+    bool const is_volume_balance_equation_type = false;
+
+    InitialStress const initial_stress;
+
+    /// Specific body forces applied to solid and fluid.
+    /// It is usually used to apply gravitational forces.
+    /// A vector of displacement dimension's length.
+    Eigen::Matrix<double, DisplacementDim, 1> const specific_body_force;
+
+    NumLib::NumericalStabilization stabilizer;
+
+    MeshLib::PropertyVector<double>* element_phi_fr = nullptr;
+    MeshLib::PropertyVector<double>* element_fluid_density = nullptr;
+    MeshLib::PropertyVector<double>* element_viscosity = nullptr;
+    MeshLib::PropertyVector<double>* element_stresses = nullptr;
+    MeshLib::PropertyVector<double>* element_ice_stresses = nullptr;
+    MeshLib::PropertyVector<double>* cell_sensible_heat = nullptr;
+    MeshLib::PropertyVector<double>* pressure_interpolated = nullptr;
+    MeshLib::PropertyVector<double>* temperature_interpolated = nullptr;
+
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+};
+
+}  // namespace ThermoHydroMechanics
+}  // namespace ProcessLib

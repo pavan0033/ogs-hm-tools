@@ -1,0 +1,196 @@
+# ---- VtkVisFilter ----
+set(FILTER_SOURCES
+    VtkAlgorithmProperties.cpp
+    VtkAppendArrayFilter.cpp
+    VtkBGImageSource.cpp
+    VtkColorByHeightFilter.cpp
+    VtkColorLookupTable.cpp
+    VtkCompositeColorByHeightFilter.cpp
+    VtkCompositeColormapToImageFilter.cpp
+    VtkCompositeContourFilter.cpp
+    VtkCompositeElementSelectionFilter.cpp
+    VtkCompositeFilter.cpp
+    VtkCompositeGeoObjectFilter.cpp
+    VtkCompositeImageToCylindersFilter.cpp
+    VtkCompositeImageToPointCloudFilter.cpp
+    VtkCompositeImageToSurfacePointsFilter.cpp
+    VtkCompositeLineToTubeFilter.cpp
+    VtkCompositeNodeSelectionFilter.cpp
+    VtkCompositePointToGlyphFilter.cpp
+    VtkCompositeTextureOnSurfaceFilter.cpp
+    VtkCompositeThresholdFilter.cpp
+    VtkGeoImageSource.cpp
+    VtkImageDataToLinePolyDataFilter.cpp
+    VtkImageDataToPointCloudFilter.cpp
+    VtkImageDataToSurfacePointsFilter.cpp
+    VtkPointsSource.cpp
+    VtkPolylinesSource.cpp
+    VtkRaster.cpp
+    VtkStationSource.cpp
+    VtkSurfacesSource.cpp
+    VtkTextureOnSurfaceFilter.cpp
+)
+if(OGS_USE_NETCDF)
+    list(APPEND FILTER_SOURCES NetCdfConfigureDialog.cpp NetCdfConfigure.ui)
+    set(UIS NetCdfConfigure.ui)
+endif()
+
+ogs_add_library(VtkVisFilter ${FILTER_SOURCES})
+target_include_directories(VtkVisFilter PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(
+    VtkVisFilter
+    PUBLIC MeshLib
+    PRIVATE GeoLib
+            DataHolderLib
+            MeshToolsLib
+            Qt5::Core
+            Qt5::Widgets
+            VTK::CommonExecutionModel
+            VTK::RenderingCore
+            VTK::IOImage
+            VTK::FiltersSources
+            VTK::FiltersGeometry
+            VTK::FiltersTexture
+)
+
+if(OGS_USE_NETCDF)
+    target_link_libraries(VtkVisFilter PUBLIC netcdf-cxx4)
+    add_autogen_include(VtkVisFilter)
+endif()
+
+# ---- VtkVis ----
+set(SOURCES
+    MeshFromRasterDialog.cpp
+    QVtkDataSetMapper.cpp
+    VisPrefsDialog.cpp
+    VisualizationWidget.cpp
+    VtkAddFilterDialog.cpp
+    VtkAlgorithmPropertyCheckbox.cpp
+    VtkAlgorithmPropertyLineEdit.cpp
+    VtkAlgorithmPropertyVectorEdit.cpp
+    VtkConsoleOutputWindow.cpp
+    VtkCustomInteractorStyle.cpp
+    VtkFilterFactory.cpp
+    VtkPickCallback.cpp
+    VtkVisHelper.cpp
+    VtkVisImageItem.cpp
+    VtkVisPipeline.cpp
+    VtkVisPipelineItem.cpp
+    VtkVisPipelineView.cpp
+    VtkVisPointSetItem.cpp
+    VtkVisTabWidget.cpp
+)
+
+set(HEADERS
+    MeshFromRasterDialog.h
+    QVtkDataSetMapper.h
+    VisPrefsDialog.h
+    VisualizationWidget.h
+    VtkAddFilterDialog.h
+    VtkAlgorithmPropertyLineEdit.h
+    VtkAlgorithmPropertyCheckbox.h
+    VtkAlgorithmPropertyVectorEdit.h
+    VtkAppendArrayFilter.h
+    VtkBGImageSource.h
+    VtkColorByHeightFilter.h
+    VtkColorLookupTable.h
+    VtkCompositeFilter.h
+    VtkCompositeColorByHeightFilter.h
+    VtkCompositeColormapToImageFilter.h
+    VtkCompositeContourFilter.h
+    VtkCompositeElementSelectionFilter.h
+    VtkCompositeGeoObjectFilter.h
+    VtkCompositeImageToCylindersFilter.h
+    VtkCompositeImageToPointCloudFilter.h
+    VtkCompositeImageToSurfacePointsFilter.h
+    VtkCompositeLineToTubeFilter.h
+    VtkCompositeNodeSelectionFilter.h
+    VtkCompositePointToGlyphFilter.h
+    VtkCompositeTextureOnSurfaceFilter.h
+    VtkCompositeThresholdFilter.h
+    VtkConsoleOutputWindow.h
+    VtkCustomInteractorStyle.h
+    VtkFilterFactory.h
+    VtkGeoImageSource.h
+    VtkImageDataToLinePolyDataFilter.h
+    VtkImageDataToPointCloudFilter.h
+    VtkImageDataToSurfacePointsFilter.h
+    VtkPickCallback.h
+    VtkPolylinesSource.h
+    VtkPointsSource.h
+    VtkRaster.h
+    VtkStationSource.h
+    VtkSurfacesSource.h
+    VtkTextureOnSurfaceFilter.h
+    VtkVisHelper.h
+    VtkVisImageItem.h
+    VtkVisPipeline.h
+    VtkVisPipelineItem.h
+    VtkVisPipelineView.h
+    VtkVisPointSetItem.h
+    VtkVisTabWidget.h
+)
+
+list(
+    APPEND
+    UIS
+    MeshFromRaster.ui
+    VisPrefs.ui
+    VisualizationWidgetBase.ui
+    VtkAddFilterDialogBase.ui
+    VtkVisTabWidgetBase.ui
+)
+
+# Visual Studio folder
+source_group("Filter Header Files" REGULAR_EXPRESSION "[.]*Filter.h")
+source_group("Filter Source Files" REGULAR_EXPRESSION "[.]*Filter.cpp")
+source_group("Source Header Files" REGULAR_EXPRESSION "[.]*Source.h")
+source_group("Source Source Files" REGULAR_EXPRESSION "[.]*Source.cpp")
+
+source_group("UI Files" FILES ${UIS})
+
+# TODO: Workaround for #3172.
+set(CMAKE_AUTOUIC NO)
+qt5_wrap_ui(genUiHeaders ${UIS})
+
+if(WIN32 OR APPLE)
+    # Circular dependency to e.g. QtDataView
+    set(_static STATIC)
+endif()
+
+ogs_add_library(VtkVis ${_static} ${SOURCES} ${HEADERS} ${UIS} ${genUiHeaders})
+target_include_directories(VtkVis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+if(GEOTIFF_FOUND)
+    target_compile_definitions(VtkVis PRIVATE GEOTIFF_FOUND)
+    include_directories(${GEOTIFF_INCLUDE_DIRS})
+    target_link_libraries(VtkVis PUBLIC ${GEOTIFF_LIBRARIES})
+endif() # GEOTIFF_FOUND
+
+target_link_libraries(
+    VtkVis
+    PUBLIC BaseLib
+           GeoLib
+           MeshLib
+           MeshToolsLib
+           DataHolderLib
+           QtBase
+           VtkVisFilter
+           VTK::GUISupportQt
+           VTK::FiltersTexture
+    PRIVATE MathLib
+            ApplicationsFileIO
+            Qt5::Gui
+            VTK::InteractionStyle
+            VTK::RenderingCore
+            VTK::RenderingAnnotation
+            VTK::FiltersGeneral
+            VTK::ImagingCore
+            VTK::IOImage
+            VTK::FiltersModeling
+            VTK::FiltersExtraction
+            VTK::FiltersGeometry
+)
+
+set_property(TARGET VtkVis PROPERTY FOLDER "DataExplorer")
+
+add_autogen_include(VtkVis)

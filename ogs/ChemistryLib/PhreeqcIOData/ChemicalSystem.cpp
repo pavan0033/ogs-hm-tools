@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "ChemicalSystem.h"
+
+#include "AqueousSolution.h"
+
+namespace ChemistryLib
+{
+namespace PhreeqcIOData
+{
+void ChemicalSystem::initialize(std::size_t const num_chemical_systems)
+{
+    aqueous_solution->H_plus_activity.resize(num_chemical_systems);
+
+    aqueous_solution->pe->resize(num_chemical_systems, aqueous_solution->pe0);
+
+    auto& components = aqueous_solution->components;
+    for (auto& component : components)
+    {
+        component.amount.resize(num_chemical_systems);
+    }
+
+    for (auto& kinetic_reactant : kinetic_reactants)
+    {
+        kinetic_reactant.molality->resize(num_chemical_systems);
+        kinetic_reactant.molality_prev->resize(num_chemical_systems);
+        kinetic_reactant.volume_fraction->resize(num_chemical_systems);
+        kinetic_reactant.volume_fraction_prev->resize(num_chemical_systems);
+    }
+
+    for (auto& equilibrium_reactant : equilibrium_reactants)
+    {
+        equilibrium_reactant.molality->resize(num_chemical_systems);
+        equilibrium_reactant.molality_prev->resize(num_chemical_systems);
+        equilibrium_reactant.volume_fraction->resize(num_chemical_systems);
+        equilibrium_reactant.volume_fraction_prev->resize(num_chemical_systems);
+    }
+
+    for (auto& exchanger : exchangers)
+    {
+        exchanger.molality->resize(num_chemical_systems);
+    }
+
+    for (auto& surface_site : surface)
+    {
+        if (auto const surface_site_ptr =
+                std::get_if<MoleBasedSurfaceSite>(&surface_site))
+        {
+            surface_site_ptr->molality->resize(num_chemical_systems);
+        }
+    }
+}
+}  // namespace PhreeqcIOData
+}  // namespace ChemistryLib

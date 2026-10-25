@@ -1,0 +1,321 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "Simulation.h"
+
+#include <spdlog/spdlog.h>
+
+#include "Applications/ApplicationsLib/LinearSolverLibrarySetup.h"
+#include "Applications/ApplicationsLib/ProjectData.h"
+#include "Applications/ApplicationsLib/TestDefinition.h"
+#include "Applications/InSituLib/Adaptor.h"
+#include "BaseLib/ConfigTreeUtil.h"
+#ifdef OGS_BUILD_PROCESS_HYDROMECHANICS
+#include "ProcessLib/HydroMechanics/HydrostaticInitialPressure.h"
+#include "AutomaticSafety.h"
+#else
+namespace ApplicationsLib { struct AutomaticSafetyPlan {}; }
+#endif
+#include "BaseLib/DateTools.h"
+#include "BaseLib/FileTools.h"
+#include "BaseLib/MPI.h"
+#include "BaseLib/PrjProcessing.h"
+#include "BaseLib/RunTime.h"
+#include "MeshLib/Mesh.h"
+#include "NumLib/NumericsConfig.h"
+#include "ProcessLib/TimeLoop.h"
+
+Simulation::Simulation(int argc, char* argv[])
+    : linear_solver_library_setup{ApplicationsLib::LinearSolverLibrarySetup::
+                                      create(argc, argv)},
+#if defined(USE_PETSC)
+      controller(vtkSmartPointer<vtkMPIController>::New()),
+#endif
+      test_definition{std::nullopt}
+{
+#if defined(USE_PETSC)
+    controller->Initialize(&argc, &argv, 1);
+    vtkMPIController::SetGlobalController(controller);
+#endif
+}
+
+void Simulation::initializeDataStructures(
+    std::string const& project,
+    std::vector<std::string> const& xml_patch_file_names,
+    bool const reference_path_is_set, std::string const& reference_path,
+    bool const nonfatal, std::string const& outdir, std::string const& mesh_dir,
+    std::string const& script_dir, bool const write_prj)
+{
+    INFO("Reading project file {}.",
+         std::filesystem::relative(project).string());
+    DBUG("Project file: {}.", std::filesystem::absolute(project).string());
+    DBUG("Working directory: {}.", std::filesystem::current_path().string());
+
+    std::string effective_outdir=outdir;
+    std::stringstream prj_stream;
+    BaseLib::prepareProjectFile(prj_stream, project, xml_patch_file_names,
+                                write_prj, outdir);
+#ifdef OGS_BUILD_PROCESS_HYDROMECHANICS
+    automatic_safety=ApplicationsLib::prepareAutomaticSafety(prj_stream,std::filesystem::absolute(project),effective_outdir);
+    std::optional<ProcessLib::HydroMechanics::GravityInitialisation> gravity;
+    if ((prj_stream.str().find("<checkpoints")!=std::string::npos || prj_stream.str().find("<restart")!=std::string::npos) &&
+        (!mesh_dir.empty() || reference_path_is_set))
+    { throw std::runtime_error("Native HM checkpoint first scope uses project-relative meshes without mesh-dir/reference-path overrides."); }
+    ProcessLib::HydroMechanics::prepareHydrostaticInitialPressure(prj_stream, effective_outdir, gravity, std::filesystem::absolute(project).parent_path());
+#endif
+    auto project_config = BaseLib::makeConfigTree(
+        project, !nonfatal, "OpenGeoSysProject", prj_stream);
+
+    if (!reference_path_is_set)
+    {  // Ignore the test_definition section.
+        project_config.ignoreConfigParameter("test_definition");
+    }
+    else
+    {
+        test_definition = ApplicationsLib::TestDefinition(
+            //! \ogs_file_param{prj__test_definition}
+            project_config.getConfigSubtree("test_definition"), reference_path,
+            outdir);
+        if (test_definition->numberOfTests() == 0)
+        {
+            OGS_FATAL(
+                "No tests were constructed from the test definitions, "
+                "but reference solutions path was given.");
+        }
+
+        INFO("Cleanup possible output files before running ogs.");
+        BaseLib::removeFiles(test_definition->getOutputFiles());
+    }
+#ifdef OGS_USE_INSITU
+    //! \ogs_file_param{prj__insitu}
+    if (auto t = project_config.getConfigSubtreeOptional("insitu"))
+    {
+        InSituLib::Initialize(
+            //! \ogs_file_param{prj__insitu__scripts}
+            t->getConfigSubtree("scripts"),
+            BaseLib::extractPath(project));
+        isInsituConfigured = true;
+    }
+#else
+    project_config.ignoreConfigParameter("insitu");
+#endif
+
+    project_data = std::make_unique<ProjectData>(project_config, effective_outdir,
+                                                 mesh_dir, script_dir);
+
+#ifdef OGS_BUILD_PROCESS_HYDROMECHANICS
+    if (gravity && !gravity->pressure_mesh.empty())
+    {
+        ProcessLib::HydroMechanics::validateGravityPressureMesh(
+            *gravity, project_data->getMesh(gravity->bulk_mesh),
+            project_data->getMesh(gravity->pressure_mesh));
+    }
+#endif
+
+    INFO("Initialize processes.");
+    for (auto& p : project_data->getProcesses())
+    {
+        p->initialize(project_data->getMedia());
+    }
+
+    // Check intermediately that config parsing went fine.
+    checkAndInvalidate(project_config);
+    BaseLib::ConfigTree::assertNoSwallowedErrors();
+
+    auto& time_loop = project_data->getTimeLoop();
+    auto time_value = time_loop.currentTime()();
+    INFO("Time step #0 started. Time: {}. Step size: 0.", time_value);
+
+    BaseLib::RunTime init_timer;
+    init_timer.start();
+    time_loop.initialize();
+    INFO("Time step #0 took {:g} s.", init_timer.elapsed());
+}
+
+double Simulation::currentTime() const
+{
+    auto const& time_loop = project_data->getTimeLoop();
+    return time_loop.currentTime()();
+}
+
+double Simulation::endTime() const
+{
+    auto const& time_loop = project_data->getTimeLoop();
+    return time_loop.endTime()();
+}
+
+bool Simulation::executeTimeStep()
+{
+    if (automatic_safety) { throw std::runtime_error("Automatic safety requires executeSimulation(), not single-step API calls."); }
+    auto& time_loop = project_data->getTimeLoop();
+    if (time_loop.currentTime() < time_loop.endTime())
+    {
+        auto const result = time_loop.executeTimeStep();
+        time_loop.calculateNextTimeStep();
+        return result;
+    }
+    return false;
+}
+
+MeshLib::Mesh& Simulation::getMesh(std::string const& name)
+{
+    return project_data->getMesh(name);
+}
+
+std::vector<std::string> Simulation::getMeshNames() const
+{
+    return project_data->getMeshNames();
+}
+
+static std::atomic<int> gSignalThatStoppedMe{-1};
+
+extern "C" void signalHandler(int signum)
+{
+    gSignalThatStoppedMe.store(signum);
+}
+
+bool Simulation::executeSimulation()
+{
+    INFO("Solve processes.");
+    auto& time_loop = project_data->getTimeLoop();
+    while (time_loop.currentTime() < time_loop.endTime())
+    {
+        time_loop.executeTimeStep();
+        if (!time_loop.calculateNextTimeStep())
+        {
+            break;
+        }
+    }
+
+#ifdef OGS_BUILD_PROCESS_HYDROMECHANICS
+    if (time_loop.successful_time_step && automatic_safety)
+    {
+        return ApplicationsLib::executeAutomaticSafety(*automatic_safety,[&](std::string const& file,std::string const& output)
+        {
+            try
+            {
+                Simulation trial(0,nullptr);
+                trial.initializeDataStructures(file,{},false,"",false,output,"","",false);
+                bool const result=trial.executeSimulation();trial.outputLastTimeStep();
+                std::ofstream(output+"/outcome.txt")<<(result?"accepted equilibrium":"nonlinear failure");return result;
+            }
+            catch (std::exception const& e)
+            {
+                std::string const message=e.what();
+                std::ofstream(output+"/outcome.txt")<<message;
+                if (message.find("Time stepper cannot reduce")!=std::string::npos || message.find("HM safety gate rejected")!=std::string::npos)
+                { WARN("Automatic safety retained numerical failure: {}",message);return false; }
+                throw;
+            }
+        });
+    }
+#endif
+    return time_loop.successful_time_step;
+}
+
+void Simulation::outputLastTimeStep() const
+{
+    auto const& time_loop = project_data->getTimeLoop();
+    time_loop.outputLastTimeStep();
+}
+
+std::optional<ApplicationsLib::TestDefinition> Simulation::getTestDefinition()
+    const
+{
+    return test_definition;
+}
+
+Simulation::~Simulation()
+{
+#ifdef OGS_USE_INSITU
+    if (isInsituConfigured)
+    {
+        InSituLib::Finalize();
+    }
+#endif
+#if defined(USE_PETSC)
+    controller->Finalize(1);
+#endif
+}
+
+int Simulation::runTestDefinitions(
+    std::optional<ApplicationsLib::TestDefinition>& test_definition)
+{
+    // In serial builds, run the complete test definition normally. In PETSc
+    // builds, xdmfdiff tests compare global XDMF/HDF5 output files and must run
+    // only once on rank 0 after all ranks have finished simulation.
+    // The rank 0 result is broadcast so every rank exits with the same status.
+    if (!test_definition)
+    {
+        auto const end_time = std::chrono::system_clock::now();
+        auto const time_str = BaseLib::formatDate(end_time);
+        DBUG("No test definition was found. No tests will be executed.");
+        INFO("OGS completed on {:s}.", time_str);
+        return EXIT_SUCCESS;
+    }
+
+#if defined(USE_PETSC)
+    bool const has_xdmfdiff_tests = test_definition->hasTests("xdmfdiff");
+    BaseLib::MPI::Mpi mpi;
+    bool const run_all_tests = !has_xdmfdiff_tests;
+    bool const run_xdmfdiff_tests = has_xdmfdiff_tests && mpi.rank == 0;
+#else
+    bool constexpr run_all_tests = true;
+    bool constexpr run_xdmfdiff_tests = false;
+#endif
+
+    auto const log_tests_header = []
+    {
+        INFO("");
+        INFO("##########################################");
+        INFO("# Running tests                          #");
+        INFO("##########################################");
+        INFO("");
+    };
+
+    auto tests_succeeded = true;
+    if (run_all_tests)
+    {
+        log_tests_header();
+        tests_succeeded = test_definition->runTests();
+    }
+    else
+    {
+        tests_succeeded = test_definition->runTestsExcluding("xdmfdiff");
+    }
+
+#if defined(USE_PETSC)
+    if (has_xdmfdiff_tests)
+    {
+        // Need to wait until all ranks have written their output.
+        MPI_Barrier(mpi.communicator);
+        auto xdmfdiff_status = EXIT_SUCCESS;
+        if (run_xdmfdiff_tests)
+        {
+            log_tests_header();
+            xdmfdiff_status = test_definition->runTests("xdmfdiff")
+                                  ? EXIT_SUCCESS
+                                  : EXIT_FAILURE;
+        }
+        MPI_Bcast(&xdmfdiff_status, 1, MPI_INT, 0, mpi.communicator);
+
+        tests_succeeded = tests_succeeded && xdmfdiff_status == EXIT_SUCCESS;
+        tests_succeeded = BaseLib::MPI::allOf(tests_succeeded, mpi);
+    }
+#endif
+
+    if (run_all_tests || run_xdmfdiff_tests)
+    {
+        auto const end_time = std::chrono::system_clock::now();
+        auto const time_str = BaseLib::formatDate(end_time);
+        if (tests_succeeded)
+        {
+            INFO("OGS completed on {:s}.", time_str);
+        }
+        else
+        {
+            ERR("OGS terminated on {:s}. One of the tests failed.", time_str);
+        }
+    }
+    return tests_succeeded ? EXIT_SUCCESS : EXIT_FAILURE;
+}

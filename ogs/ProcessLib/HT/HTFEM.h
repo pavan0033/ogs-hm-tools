@@ -1,0 +1,429 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <Eigen/Core>
+#include <optional>
+#include <vector>
+
+#include "HTLocalAssemblerInterface.h"
+#include "HTProcessData.h"
+#include "MaterialLib/MPL/Medium.h"
+#include "MaterialLib/MPL/Utils/FormEigenTensor.h"
+#include "NumLib/DOF/DOFTableUtil.h"
+#include "NumLib/Extrapolation/ExtrapolatableElement.h"
+#include "NumLib/Fem/FiniteElement/TemplateIsoparametric.h"
+#include "NumLib/Fem/InitShapeMatrices.h"
+#include "NumLib/Fem/Integration/GenericIntegrationMethod.h"
+#include "NumLib/Fem/ShapeMatrixPolicy.h"
+#include "NumLib/NumericalStability/HydrodynamicDispersion.h"
+#include "ParameterLib/Parameter.h"
+
+namespace ProcessLib
+{
+namespace HT
+{
+/// Computes the effective thermal expansivity
+/// \f$3(\alpha_B-\phi)\alpha_T^s
+///   - \phi\frac{\partial \varrho_f}{\partial T}/\varrho_f\f$
+/// used in the thermal expansion term of the pressure equation.
+///
+/// The fluid contribution
+/// \f$-\phi\frac{\partial \varrho_f}{\partial T}/\varrho_f\f$ is always
+/// present. The solid contribution
+/// \f$3(\alpha_B-\phi)\alpha_T^s\f$ is added only if
+/// \c has_solid_thermal_expansivity is \c true.
+///
+/// \param t     Current time.
+/// \param dt    Time increment.
+/// \param pos   Spatial position of the current integration point.
+/// \param vars  Variable array of the current integration point. Its
+///              \c density and \c porosity members must already be set, since
+///              they are read instead of being evaluated here.
+/// \param medium       Medium, provides the Biot coefficient
+///                     \f$\alpha_B\f$.
+/// \param liquid_phase Liquid phase, provides
+///                     \f$\frac{\partial \varrho_f}{\partial T}\f$.
+/// \param solid_phase  Solid phase, provides the linear solid thermal
+///                     expansivity \f$\alpha_T^s\f$.
+/// \param has_solid_thermal_expansivity Whether the solid phase defines
+///        \c thermal_expansivity. Passed in rather than queried here so that
+///        the callers can hoist the property lookup out of their integration
+///        point loop.
+/// \param specific_storage Specific storage \f$S_s\f$ of the solid phase at
+///        the current integration point. Not used in the returned value; it is
+///        passed in only so that the requirement \f$\alpha_B=1 \Rightarrow
+///        S_s=0\f$ can be checked against the evaluated values, which is the
+///        only place where it can be checked for properties that depend on the
+///        primary variables. The function is fatal if the requirement is
+///        violated. Passed in rather than evaluated here to avoid evaluating
+///        the storage property twice per integration point, since the callers
+///        already need its value.
+double evalEffectiveThermalExpansivity(
+    double const t, double const dt, ParameterLib::SpatialPosition const& pos,
+    MaterialPropertyLib::VariableArray const& vars,
+    MaterialPropertyLib::Medium const& medium,
+    MaterialPropertyLib::Phase const& liquid_phase,
+    MaterialPropertyLib::Phase const& solid_phase,
+    bool const has_solid_thermal_expansivity, double const specific_storage);
+
+/// Checks the requirement \f$\alpha_B=1 \Rightarrow S_s=0\f$ on the evaluated
+/// Biot coefficient of \c medium and the evaluated specific storage of
+/// \c solid_phase at the position \c pos, and ends the run with \c OGS_FATAL
+/// if it is violated.
+///
+/// Both properties are evaluated with \c vars, \c t and \c dt, i.e. with the
+/// state the caller has set. At initialisation time the caller passes an empty
+/// \c vars and \f$t=dt=0\f$ -- the literal zero, not the initial time of the
+/// time loop, which may differ. Properties that depend on neither the primary
+/// variables nor the time are therefore fully checked there. Properties that do
+/// depend on the primary variables evaluate to NaN instead; a Biot coefficient
+/// of NaN compares unequal to one and a specific storage of NaN is excluded
+/// explicitly, so the check passes in both cases. A property depending on the
+/// time is checked at \f$t=0\f$ only, which is a state the simulation need not
+/// pass through at all. Those cases are covered by the check on the evaluated
+/// values in evalEffectiveThermalExpansivity().
+void checkBiotStorageRelation(double const t, double const dt,
+                              ParameterLib::SpatialPosition const& pos,
+                              MaterialPropertyLib::VariableArray const& vars,
+                              MaterialPropertyLib::Medium const& medium,
+                              MaterialPropertyLib::Phase const& solid_phase);
+
+template <typename ShapeFunction, int GlobalDim>
+class HTFEM : public HTLocalAssemblerInterface
+{
+    using ShapeMatricesType = ShapeMatrixPolicyType<ShapeFunction, GlobalDim>;
+    using ShapeMatrices = typename ShapeMatricesType::ShapeMatrices;
+
+    using NodalVectorType = typename ShapeMatricesType::NodalVectorType;
+    using NodalRowVectorType = typename ShapeMatricesType::NodalRowVectorType;
+
+    using GlobalDimVectorType = typename ShapeMatricesType::GlobalDimVectorType;
+    using GlobalDimNodalMatrixType =
+        typename ShapeMatricesType::GlobalDimNodalMatrixType;
+    using GlobalDimMatrixType = typename ShapeMatricesType::GlobalDimMatrixType;
+
+public:
+    HTFEM(MeshLib::Element const& element,
+          std::size_t const local_matrix_size,
+          NumLib::GenericIntegrationMethod const& integration_method,
+          bool const is_axially_symmetric,
+          HTProcessData const& process_data,
+          const unsigned dof_per_node)
+        : HTLocalAssemblerInterface(),
+          _element(element),
+          _process_data(process_data),
+          _integration_method(integration_method)
+    {
+        // This assertion is valid only if all nodal d.o.f. use the same shape
+        // matrices.
+        assert(local_matrix_size == ShapeFunction::NPOINTS * dof_per_node);
+        (void)local_matrix_size;
+        (void)dof_per_node;
+
+        unsigned const n_integration_points =
+            _integration_method.getNumberOfPoints();
+        _ip_data.reserve(n_integration_points);
+
+        ParameterLib::SpatialPosition pos;
+        pos.setElementID(_element.getID());
+
+        double const aperture_size = _process_data.aperture_size(0.0, pos)[0];
+
+        auto const shape_matrices =
+            NumLib::initShapeMatrices<ShapeFunction, ShapeMatricesType,
+                                      GlobalDim>(element, is_axially_symmetric,
+                                                 _integration_method);
+
+        for (unsigned ip = 0; ip < n_integration_points; ip++)
+        {
+            _ip_data.emplace_back(
+                shape_matrices[ip].dNdx,
+                _integration_method.getWeightedPoint(ip).getWeight() *
+                    shape_matrices[ip].integralMeasure *
+                    shape_matrices[ip].detJ * aperture_size);
+        }
+    }
+
+    void initializeConcrete() override
+    {
+        auto const& medium =
+            *_process_data.media_map.getMedium(_element.getID());
+        auto const& solid_phase =
+            medium.phase(MaterialPropertyLib::PhaseName::Solid);
+
+        // The Biot coefficient is read only together with the solid thermal
+        // expansivity, see evalEffectiveThermalExpansivity().
+        if (!solid_phase.hasProperty(
+                MaterialPropertyLib::PropertyType::thermal_expansivity))
+        {
+            return;
+        }
+
+        MaterialPropertyLib::VariableArray vars;
+        vars.liquid_saturation = 1.0;
+
+        auto const& Ns =
+            _process_data.shape_matrix_cache
+                .template NsHigherOrder<typename ShapeFunction::MeshElement>();
+
+        unsigned const n_integration_points =
+            _integration_method.getNumberOfPoints();
+        for (unsigned ip = 0; ip < n_integration_points; ip++)
+        {
+            ParameterLib::SpatialPosition const pos{
+                std::nullopt, _element.getID(),
+                MathLib::Point3d(
+                    NumLib::interpolateCoordinates<ShapeFunction,
+                                                   ShapeMatricesType>(_element,
+                                                                      Ns[ip]))};
+
+            checkBiotStorageRelation(0.0 /* t */, 0.0 /* dt */, pos, vars,
+                                     medium, solid_phase);
+        }
+    }
+
+    Eigen::Map<const Eigen::RowVectorXd> getShapeMatrix(
+        const unsigned integration_point) const override
+    {
+        auto const& N = _process_data.shape_matrix_cache.NsHigherOrder<
+            typename ShapeFunction::MeshElement>()[integration_point];
+
+        // assumes N is stored contiguously in memory
+        return Eigen::Map<const Eigen::RowVectorXd>(N.data(), N.size());
+    }
+
+    /// Computes the flux in the point \c pnt_local_coords that is given in
+    /// local coordinates using the values from \c local_x.
+    Eigen::Vector3d getFlux(MathLib::Point3d const& pnt_local_coords,
+                            double const t,
+                            std::vector<double> const& local_x) const override
+    {
+        // Eval shape matrices at given point
+        // Note: Axial symmetry is set to false here, because we only need dNdx
+        // here, which is not affected by axial symmetry.
+        auto const shape_matrices =
+            NumLib::computeShapeMatrices<ShapeFunction, ShapeMatricesType,
+                                         GlobalDim>(
+                _element, false /*is_axially_symmetric*/,
+                std::array{pnt_local_coords})[0];
+
+        ParameterLib::SpatialPosition pos;
+        pos.setElementID(this->_element.getID());
+
+        MaterialPropertyLib::VariableArray vars;
+
+        // local_x contains the local temperature and pressure values
+        double T_int_pt = 0.0;
+        double p_int_pt = 0.0;
+        NumLib::shapeFunctionInterpolate(local_x, shape_matrices.N, T_int_pt,
+                                         p_int_pt);
+
+        vars.temperature = T_int_pt;
+        vars.liquid_phase_pressure = p_int_pt;
+
+        auto const& medium =
+            *_process_data.media_map.getMedium(_element.getID());
+        auto const& liquid_phase =
+            medium.phase(MaterialPropertyLib::PhaseName::AqueousLiquid);
+
+        // TODO (naumov) Temporary value not used by current material models.
+        // Need extension of secondary variables interface.
+        double const dt = std::numeric_limits<double>::quiet_NaN();
+        // fetch permeability, viscosity, density
+        auto const K = MaterialPropertyLib::formEigenTensor<GlobalDim>(
+            medium.property(MaterialPropertyLib::PropertyType::permeability)
+                .value(vars, pos, t, dt));
+
+        auto const mu =
+            liquid_phase.property(MaterialPropertyLib::PropertyType::viscosity)
+                .template value<double>(vars, pos, t, dt);
+        GlobalDimMatrixType const K_over_mu = K / mu;
+
+        auto const p_nodal_values = Eigen::Map<const NodalVectorType>(
+            &local_x[local_x.size() / 2], ShapeFunction::NPOINTS);
+        GlobalDimVectorType q =
+            -K_over_mu * shape_matrices.dNdx * p_nodal_values;
+
+        if (this->_process_data.has_gravity)
+        {
+            auto const rho_w =
+                liquid_phase
+                    .property(MaterialPropertyLib::PropertyType::density)
+                    .template value<double>(vars, pos, t, dt);
+            auto const b =
+                this->_process_data.projected_specific_body_force_vectors
+                    [this->_element.getID()];
+            q += K_over_mu * rho_w * b;
+        }
+
+        Eigen::Vector3d flux;
+        flux.head<GlobalDim>() = q;
+        return flux;
+    }
+
+protected:
+    MeshLib::Element const& _element;
+    HTProcessData const& _process_data;
+
+    NumLib::GenericIntegrationMethod const& _integration_method;
+    std::vector<IntegrationPointData<GlobalDimNodalMatrixType>> _ip_data;
+
+    double getHeatEnergyCoefficient(
+        MaterialPropertyLib::VariableArray const& vars, const double porosity,
+        const double fluid_density, const double specific_heat_capacity_fluid,
+        ParameterLib::SpatialPosition const& pos, double const t,
+        double const dt)
+    {
+        auto const& medium =
+            *_process_data.media_map.getMedium(this->_element.getID());
+        auto const& solid_phase =
+            medium.phase(MaterialPropertyLib::PhaseName::Solid);
+
+        auto const specific_heat_capacity_solid =
+            solid_phase
+                .property(
+                    MaterialPropertyLib::PropertyType::specific_heat_capacity)
+                .template value<double>(vars, pos, t, dt);
+
+        auto const solid_density =
+            solid_phase.property(MaterialPropertyLib::PropertyType::density)
+                .template value<double>(vars, pos, t, dt);
+
+        return solid_density * specific_heat_capacity_solid * (1 - porosity) +
+               fluid_density * specific_heat_capacity_fluid * porosity;
+    }
+
+    GlobalDimMatrixType getThermalConductivityDispersivity(
+        MaterialPropertyLib::VariableArray const& vars,
+        const double fluid_density, const double specific_heat_capacity_fluid,
+        const GlobalDimVectorType& velocity,
+        ParameterLib::SpatialPosition const& pos, double const t,
+        double const dt)
+    {
+        auto const& medium =
+            *_process_data.media_map.getMedium(_element.getID());
+
+        auto thermal_conductivity =
+            MaterialPropertyLib::formEigenTensor<GlobalDim>(
+                medium
+                    .property(
+                        MaterialPropertyLib::PropertyType::thermal_conductivity)
+                    .value(vars, pos, t, dt));
+
+        auto const thermal_dispersivity_transversal =
+            medium
+                .property(MaterialPropertyLib::PropertyType::
+                              thermal_transversal_dispersivity)
+                .template value<double>();
+
+        auto const thermal_dispersivity_longitudinal =
+            medium
+                .property(MaterialPropertyLib::PropertyType::
+                              thermal_longitudinal_dispersivity)
+                .template value<double>();
+
+        // Thermal conductivity is moved outside and zero matrix is passed
+        // instead due to multiplication with fluid's density times specific
+        // heat capacity.
+        return thermal_conductivity +
+               fluid_density * specific_heat_capacity_fluid *
+                   NumLib::computeHydrodynamicDispersion(
+                       _process_data.stabilizer, _element.getID(),
+                       GlobalDimMatrixType::Zero(GlobalDim, GlobalDim),
+                       velocity, 0 /* phi */, thermal_dispersivity_transversal,
+                       thermal_dispersivity_longitudinal);
+    }
+
+    std::vector<double> const& getIntPtDarcyVelocityLocal(
+        const double t, std::vector<double> const& local_x,
+        std::vector<double>& cache) const
+    {
+        std::vector<double> local_p{
+            local_x.data() + pressure_index,
+            local_x.data() + pressure_index + pressure_size};
+        std::vector<double> local_T{
+            local_x.data() + temperature_index,
+            local_x.data() + temperature_index + temperature_size};
+
+        auto const n_integration_points =
+            _integration_method.getNumberOfPoints();
+
+        cache.clear();
+        auto cache_mat = MathLib::createZeroedMatrix<
+            Eigen::Matrix<double, GlobalDim, Eigen::Dynamic, Eigen::RowMajor>>(
+            cache, GlobalDim, n_integration_points);
+
+        ParameterLib::SpatialPosition pos;
+        pos.setElementID(_element.getID());
+
+        MaterialPropertyLib::VariableArray vars;
+
+        auto const p_nodal_values = Eigen::Map<const NodalVectorType>(
+            &local_p[0], ShapeFunction::NPOINTS);
+
+        auto const& medium =
+            *_process_data.media_map.getMedium(_element.getID());
+        auto const& liquid_phase =
+            medium.phase(MaterialPropertyLib::PhaseName::AqueousLiquid);
+
+        auto const& Ns =
+            _process_data.shape_matrix_cache
+                .NsHigherOrder<typename ShapeFunction::MeshElement>();
+
+        for (unsigned ip = 0; ip < n_integration_points; ++ip)
+        {
+            auto const& ip_data = _ip_data[ip];
+            auto const& dNdx = ip_data.dNdx;
+            auto const& N = Ns[ip];
+
+            double T_int_pt = 0.0;
+            double p_int_pt = 0.0;
+            NumLib::shapeFunctionInterpolate(local_p, N, p_int_pt);
+            NumLib::shapeFunctionInterpolate(local_T, N, T_int_pt);
+
+            vars.temperature = T_int_pt;
+            vars.liquid_phase_pressure = p_int_pt;
+
+            // TODO (naumov) Temporary value not used by current material
+            // models. Need extension of secondary variables interface.
+            double const dt = std::numeric_limits<double>::quiet_NaN();
+            auto const K = MaterialPropertyLib::formEigenTensor<GlobalDim>(
+                medium.property(MaterialPropertyLib::PropertyType::permeability)
+                    .value(vars, pos, t, dt));
+
+            auto const mu =
+                liquid_phase
+                    .property(MaterialPropertyLib::PropertyType::viscosity)
+                    .template value<double>(vars, pos, t, dt);
+            GlobalDimMatrixType const K_over_mu = K / mu;
+
+            cache_mat.col(ip).noalias() = -K_over_mu * dNdx * p_nodal_values;
+
+            if (_process_data.has_gravity)
+            {
+                auto const rho_w =
+                    liquid_phase
+                        .property(MaterialPropertyLib::PropertyType::density)
+                        .template value<double>(vars, pos, t, dt);
+                auto const b =
+                    _process_data.projected_specific_body_force_vectors
+                        [_element.getID()];
+                // here it is assumed that the vector b is directed 'downwards'
+                cache_mat.col(ip).noalias() += K_over_mu * rho_w * b;
+            }
+        }
+
+        return cache;
+    }
+
+protected:
+    static const int pressure_index = ShapeFunction::NPOINTS;
+    static const int pressure_size = ShapeFunction::NPOINTS;
+    static const int temperature_index = 0;
+    static const int temperature_size = ShapeFunction::NPOINTS;
+};
+
+}  // namespace HT
+}  // namespace ProcessLib

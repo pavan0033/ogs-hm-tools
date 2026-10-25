@@ -1,0 +1,105 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <vector>
+
+#include "BaseLib/Logging.h"
+#include "LocalAssemblerFactoryPython.h"
+#include "NumLib/DOF/LocalToGlobalIndexMap.h"
+
+namespace ProcessLib
+{
+namespace BoundaryConditionAndSourceTerm
+{
+namespace detail
+{
+template <int GlobalDim,
+          template <typename /* shp */, typename /* lower order shp */,
+                    int /* global dim */>
+          class LocalAssemblerImplementation,
+          typename LocalAssemblerInterface, typename... ExtraCtorArgs>
+void createLocalAssemblersPython(
+    NumLib::LocalToGlobalIndexMap const& dof_table,
+    std::vector<MeshLib::Element*> const& mesh_elements,
+    std::vector<std::unique_ptr<LocalAssemblerInterface>>& local_assemblers,
+    NumLib::IntegrationOrder const integration_order,
+    ExtraCtorArgs&&... extra_ctor_args)
+{
+    using LocAsmFactory =
+        LocalAssemblerFactoryPython<LocalAssemblerInterface,
+                                    LocalAssemblerImplementation, GlobalDim,
+                                    ExtraCtorArgs...>;
+
+    DBUG("Create local assemblers.");
+
+    NumLib::DefaultIntegrationMethodProvider integration_method_provider{
+        integration_order};
+    LocAsmFactory factory(dof_table, integration_method_provider);
+    local_assemblers.resize(mesh_elements.size());
+
+    DBUG("Calling local assembler builder for all mesh elements.");
+    GlobalExecutor::transformDereferenced(
+        factory, mesh_elements, local_assemblers,
+        std::forward<ExtraCtorArgs>(extra_ctor_args)...);
+}
+}  // namespace detail
+/*! Creates a local assembler for each of the given \c mesh_elements.
+ *
+ * \tparam LocalAssemblerImplementation the individual local assembler type
+ * \tparam LocalAssemblerInterface the general local assembler interface
+ * \tparam ExtraCtorArgs types of additional constructor arguments.
+ *         Those arguments will be passed to the constructor of
+ *         \c LocalAssemblerImplementation.
+ *
+ * The first two template parameters cannot be deduced from the arguments.
+ * Therefore they always have to be provided manually.
+ */
+template <template <typename /* shp */, typename /* lower order shp */,
+                    int /* global dim */>
+          class LocalAssemblerImplementation,
+          typename LocalAssemblerInterface, typename... ExtraCtorArgs>
+void createLocalAssemblersPython(
+    const unsigned dimension,
+    std::vector<MeshLib::Element*> const& mesh_elements,
+    NumLib::LocalToGlobalIndexMap const& dof_table,
+    std::vector<std::unique_ptr<LocalAssemblerInterface>>& local_assemblers,
+    NumLib::IntegrationOrder const integration_order,
+    ExtraCtorArgs&&... extra_ctor_args)
+{
+    DBUG("Create local assemblers.");
+
+    switch (dimension)
+    {
+        case 0:
+            detail::createLocalAssemblersPython<0,
+                                                LocalAssemblerImplementation>(
+                dof_table, mesh_elements, local_assemblers, integration_order,
+                std::forward<ExtraCtorArgs>(extra_ctor_args)...);
+            break;
+        case 1:
+            detail::createLocalAssemblersPython<1,
+                                                LocalAssemblerImplementation>(
+                dof_table, mesh_elements, local_assemblers, integration_order,
+                std::forward<ExtraCtorArgs>(extra_ctor_args)...);
+            break;
+        case 2:
+            detail::createLocalAssemblersPython<2,
+                                                LocalAssemblerImplementation>(
+                dof_table, mesh_elements, local_assemblers, integration_order,
+                std::forward<ExtraCtorArgs>(extra_ctor_args)...);
+            break;
+        case 3:
+            detail::createLocalAssemblersPython<3,
+                                                LocalAssemblerImplementation>(
+                dof_table, mesh_elements, local_assemblers, integration_order,
+                std::forward<ExtraCtorArgs>(extra_ctor_args)...);
+            break;
+        default:
+            OGS_FATAL(
+                "Meshes with dimension greater than three are not supported.");
+    }
+}
+}  // namespace BoundaryConditionAndSourceTerm
+}  // namespace ProcessLib

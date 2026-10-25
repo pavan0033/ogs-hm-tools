@@ -1,0 +1,64 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "Component.h"
+
+#include "BaseLib/Error.h"
+#include "Components/Components.h"
+#include "Properties/Properties.h"
+
+namespace MaterialPropertyLib
+{
+Component::Component() {}
+
+Component::Component(std::string const& component_name,
+                     std::unique_ptr<PropertyArray>&& properties)
+    : name(component_name)
+{
+    if (properties)
+    {
+        overwriteExistingProperties(properties_, *properties, this);
+    }
+}
+
+Property const& Component::property(PropertyType const& p) const
+{
+    Property const* const property = properties_[p].get();
+    if (property == nullptr)
+    {
+        OGS_FATAL("Trying to access undefined property '{:s}' of {:s}",
+                  property_enum_to_string[p], description());
+    }
+
+    return *properties_[p];
+}
+
+Property const& Component::operator[](PropertyType const& p) const
+{
+    return property(p);
+}
+
+bool Component::hasProperty(PropertyType const& p) const
+{
+    return properties_[p] != nullptr;
+}
+
+std::string Component::description() const
+{
+    return "component '" + name + "'";
+}
+
+void checkRequiredProperties(
+    Component const& c, std::span<PropertyType const> const required_properties)
+{
+    for (auto const& p : required_properties)
+    {
+        if (!c.hasProperty(p))
+        {
+            OGS_FATAL("The property '{:s}' is missing in the component '{:s}'.",
+                      property_enum_to_string[p], c.name);
+        }
+    }
+}
+
+}  // namespace MaterialPropertyLib

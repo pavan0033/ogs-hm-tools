@@ -1,0 +1,97 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <tclap/CmdLine.h>
+
+#include <fstream>
+#include <memory>
+
+#include "BaseLib/FileTools.h"
+#include "BaseLib/Logging.h"
+#include "BaseLib/MPI.h"
+#include "BaseLib/TCLAPArguments.h"
+#include "InfoLib/GitInfo.h"
+#include "MeshLib/Elements/Element.h"
+#include "MeshLib/IO/readMeshFromFile.h"
+#include "MeshLib/IO/writeMeshToFile.h"
+#include "MeshLib/Mesh.h"
+
+int main(int argc, char* argv[])
+{
+    TCLAP::CmdLine cmd(
+        "Creates a new file for material properties and sets the material ids "
+        "in the msh-file to 0\n\n"
+        "OpenGeoSys-6 software, version " +
+            GitInfoLib::GitInfo::ogs_version +
+            ".\n"
+            "Copyright (c) 2012-2026, OpenGeoSys Community "
+            "(http://www.opengeosys.org)",
+        ' ', GitInfoLib::GitInfo::ogs_version);
+
+    TCLAP::ValueArg<std::string> mesh_arg(
+        "m",
+        "mesh",
+        "Input (.msh). The mesh to open from a file",
+        false,
+        "",
+        "INPUT_FILE");
+    cmd.add(mesh_arg);
+    auto log_level_arg = BaseLib::makeLogLevelArg();
+    cmd.add(log_level_arg);
+
+    cmd.parse(argc, argv);
+
+    BaseLib::MPI::Setup mpi_setup(argc, argv);
+    BaseLib::initOGSLogger(log_level_arg.getValue());
+
+    // read mesh
+    std::unique_ptr<MeshLib::Mesh> mesh(
+        MeshLib::IO::readMeshFromFile(mesh_arg.getValue()));
+
+    if (!mesh)
+    {
+        INFO("Could not read mesh from file '{:s}'.", mesh_arg.getValue());
+        return EXIT_FAILURE;
+    }
+
+    auto const materialIds = materialIDs(*mesh);
+    if (!materialIds)
+    {
+        OGS_FATAL("Mesh contains no int-property vector named 'MaterialIDs'.");
+    }
+
+    std::size_t const n_properties(materialIds->size());
+    assert(n_properties != mesh->getNumberOfElements());
+
+    std::string const name =
+        BaseLib::extractBaseNameWithoutExtension(mesh_arg.getValue());
+    // create file
+    std::string const new_matname(name + "_prop");
+    std::ofstream out_prop(new_matname.c_str(), std::ios::out);
+    if (out_prop.is_open())
+    {
+        for (std::size_t i = 0; i < n_properties; ++i)
+        {
+            out_prop << i << "\t" << (*materialIds)[i] << "\n";
+        }
+        out_prop.close();
+    }
+    else
+    {
+        ERR("Could not create property '{:s}' file.", new_matname);
+        return EXIT_FAILURE;
+    }
+
+    mesh->getProperties().removePropertyVector("MaterialIDs");
+
+    std::string const new_mshname(name + "_new.vtu");
+    INFO("Writing mesh to file '{:s}'.", new_mshname);
+    if (MeshLib::IO::writeMeshToFile(*mesh, new_mshname) != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    INFO("New files '{:s}' and '{:s}' written.", new_mshname, new_matname);
+
+    return EXIT_SUCCESS;
+}

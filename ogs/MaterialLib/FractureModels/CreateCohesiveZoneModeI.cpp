@@ -1,0 +1,64 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "CreateCohesiveZoneModeI.h"
+
+#include "CohesiveZoneModeI.h"
+#include "ParameterLib/Utils.h"
+
+namespace MaterialLib
+{
+namespace Fracture
+{
+namespace CohesiveZoneModeI
+{
+template <int DisplacementDim>
+std::unique_ptr<FractureModelBase<DisplacementDim>> createCohesiveZoneModeI(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    BaseLib::ConfigTree const& config)
+{
+    //! \ogs_file_param{material__fracture_model__type}
+    config.checkConfigParameter("type", "CohesiveZoneModeI");
+    DBUG("Create CohesiveZoneModeI material");
+
+    auto const& Kn = ParameterLib::findParameter<double>(
+        //! \ogs_file_param_special{material__fracture_model__CohesiveZoneModeI__normal_stiffness}
+        config, "normal_stiffness", parameters, 1);
+
+    auto const& Ks = ParameterLib::findParameter<double>(
+        //! \ogs_file_param_special{material__fracture_model__CohesiveZoneModeI__shear_stiffness}
+        config, "shear_stiffness", parameters, 1);
+
+    auto const& Gc = ParameterLib::findParameter<double>(
+        //! \ogs_file_param_special{material__fracture_model__CohesiveZoneModeI__fracture_toughness}
+        config, "fracture_toughness", parameters, 1);
+
+    auto const& t_np = ParameterLib::findParameter<double>(
+        //! \ogs_file_param_special{material__fracture_model__CohesiveZoneModeI__peak_normal_traction}
+        config, "peak_normal_traction", parameters, 1);
+
+    auto const penalty_aperture_cutoff =
+        //! \ogs_file_param{material__fracture_model__CohesiveZoneModeI__penalty_aperture_cutoff}
+        config.getConfigParameter<double>("penalty_aperture_cutoff");
+
+    auto const tension_cutoff =
+        //! \ogs_file_param{material__fracture_model__CohesiveZoneModeI__tension_cutoff}
+        config.getConfigParameter<bool>("tension_cutoff");
+
+    MaterialPropertiesParameters mp{Kn, Ks, Gc, t_np};
+
+    return std::make_unique<CohesiveZoneModeI<DisplacementDim>>(
+        penalty_aperture_cutoff, tension_cutoff, mp);
+}
+
+template std::unique_ptr<FractureModelBase<2>> createCohesiveZoneModeI(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    BaseLib::ConfigTree const& config);
+
+template std::unique_ptr<FractureModelBase<3>> createCohesiveZoneModeI(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    BaseLib::ConfigTree const& config);
+
+}  // namespace CohesiveZoneModeI
+}  // namespace Fracture
+}  // namespace MaterialLib

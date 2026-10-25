@@ -1,0 +1,250 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <gtest/gtest.h>
+
+#include <unordered_map>
+
+#include "MeshLib/Elements/Elements.h"
+#include "NumLib/Fem/Integration/GaussLegendreIntegrationPolicy.h"
+#include "NumLib/Fem/Integration/IntegrationMethodRegistry.h"
+#include "Tests/Utils.h"
+
+namespace
+{
+template <typename IntegrationMethod>
+static unsigned getMaximumIntegrationOrderOfTemplatedIntegrationMethod(
+    unsigned const order_cutoff)
+{
+    unsigned order = 1;
+    int num_int_pts_last_iteration = -1;
+
+    // trying all integration orders until one fails
+    for (; order < order_cutoff; ++order)
+    {
+        int num_int_pts = -1;
+        try
+        {
+            IntegrationMethod int_meth{order};
+            num_int_pts = int_meth.getNumberOfPoints();
+            unsigned const int_pt = 0;  // integration point zero should work
+                                        // for any valid integration order
+            int_meth.getWeightedPoint(int_pt);
+        }
+        catch (...)
+        {
+            // Integration method or weighted point is not available, so we have
+            // exceeded the maximum integration order.
+            --order;
+            break;
+        }
+
+        if (num_int_pts <= num_int_pts_last_iteration)
+        {
+            // The number of integration points is not greater than for the
+            // preceding integration order, so we have exceeded the maximum
+            // integration order.
+            --order;
+            break;
+        }
+
+        num_int_pts_last_iteration = num_int_pts;
+    }
+
+    EXPECT_NE(order_cutoff, order)
+        << "We hit the order cutoff. Determination of the maximum integration "
+           "order in this unit test is wrong";
+
+    return order;
+}
+
+template <typename MeshElementType>
+static unsigned getMaximumIntegrationOrderFromIntegrationMethodRegistry(
+    unsigned const order_cutoff)
+{
+    unsigned order = 1;
+
+    // trying all integration orders until one fails
+    for (; order < order_cutoff; ++order)
+    {
+        try
+        {
+            NumLib::IntegrationMethodRegistry::getIntegrationMethod<
+                MeshElementType>(NumLib::IntegrationOrder{order});
+        }
+        catch (...)
+        {
+            // Integration method or weighted point is not available, so we have
+            // exceeded the maximum integration order.
+            --order;
+            break;
+        }
+    }
+
+    EXPECT_NE(order_cutoff, order)
+        << "We hit the order cutoff. Determination of the maximum integration "
+           "order in this unit test is wrong";
+
+    return order;
+}
+}  // namespace
+
+static std::unordered_map<std::type_index, unsigned> initMapTypeToMaxOrder()
+{
+    using namespace MeshLib;
+
+    std::unordered_map<std::type_index, unsigned> map_type_to_max_order;
+
+    auto add = [&](std::type_info const& info, unsigned order)
+    {
+        auto const [it, inserted] =
+            map_type_to_max_order.emplace(std::type_index(info), order);
+        if (!inserted)
+        {
+            throw std::runtime_error(
+                "Maximum integration order already present for the "
+                "current mesh element type. See file " __FILE__);
+        }
+    };
+
+    add(typeid(Point), 4);
+    add(typeid(Line), 4);
+    add(typeid(Line3), 4);
+    add(typeid(Quad), 4);
+    add(typeid(Quad8), 4);
+    add(typeid(Quad9), 4);
+    add(typeid(Tri), 4);
+    add(typeid(Tri6), 4);
+    add(typeid(Hex), 4);
+    add(typeid(Hex20), 4);
+    add(typeid(Tet), 4);
+    add(typeid(Tet10), 4);
+    add(typeid(Prism), 4);
+    add(typeid(Prism15), 4);
+    add(typeid(Pyramid), 4);
+    add(typeid(Pyramid13), 4);
+
+    if (std::tuple_size_v<AllElementTypes> != map_type_to_max_order.size())
+    {
+        throw std::runtime_error(
+            "Some element types are missing in the mapping from mesh element "
+            "type to maximum integration order. See file " __FILE__);
+    }
+
+    return map_type_to_max_order;
+}
+
+static const std::unordered_map<std::type_index, unsigned>
+    map_type_to_max_order = initMapTypeToMaxOrder();
+
+// Test fixture.
+template <typename MeshElementType>
+class NumLibIntegrationMethodRegistryTest : public ::testing::Test
+{
+    std::type_index const type_index = std::type_index(typeid(MeshElementType));
+
+protected:
+    unsigned const max_order = map_type_to_max_order.at(type_index);
+
+    NumLib::GenericIntegrationMethod const& getGenericIntegrationMethod(
+        unsigned const order) const
+    {
+        return NumLib::IntegrationMethodRegistry::getIntegrationMethod<
+            MeshElementType>(NumLib::IntegrationOrder{order});
+    }
+};
+
+using MeshElementTypes =
+    ConvertListType_t<MeshLib::AllElementTypes, ::testing::Types>;
+
+TYPED_TEST_SUITE(NumLibIntegrationMethodRegistryTest, MeshElementTypes);
+
+TYPED_TEST(NumLibIntegrationMethodRegistryTest, HasRightOrder)
+{
+    for (unsigned order = 1; order <= this->max_order; ++order)
+    {
+        auto const& generic_int_meth = this->getGenericIntegrationMethod(order);
+
+        EXPECT_EQ(order, generic_int_meth.getIntegrationOrder());
+    }
+}
+
+TYPED_TEST(NumLibIntegrationMethodRegistryTest, HasRightIntegrationPoints)
+{
+    using MeshElementType = TypeParam;
+
+    for (unsigned order = 1; order <= this->max_order; ++order)
+    {
+        auto const& generic_int_meth = this->getGenericIntegrationMethod(order);
+
+        using IntegrationPolicy =
+            NumLib::GaussLegendreIntegrationPolicy<MeshElementType>;
+        using NonGenericIntegrationMethod =
+            typename IntegrationPolicy::IntegrationMethod;
+
+        NonGenericIntegrationMethod int_meth{order};
+
+        auto const num_int_pts = generic_int_meth.getNumberOfPoints();
+        auto const num_int_pts_expected = int_meth.getNumberOfPoints();
+        ASSERT_EQ(num_int_pts_expected, num_int_pts)
+            << "Wrong number of integration points for integration order "
+            << order << '.';
+
+        for (unsigned ip = 0; ip < num_int_pts; ++ip)
+        {
+            auto const& wp_expected = int_meth.getWeightedPoint(ip);
+            auto const& wp_actual = generic_int_meth.getWeightedPoint(ip);
+            EXPECT_EQ(wp_expected, wp_actual)
+                << "Wrong integration point (#" << ip
+                << ") for integration order " << order << '.'
+                << "\nexpected: " << wp_expected << "\nactual:   " << wp_actual;
+        }
+    }
+}
+
+TYPED_TEST(NumLibIntegrationMethodRegistryTest, OrderZeroForbidden)
+{
+    unsigned const order = 0;
+
+    ASSERT_ANY_THROW(this->getGenericIntegrationMethod(order));
+}
+
+// Assert that we don't forget any integration method in this test suite.
+TYPED_TEST(NumLibIntegrationMethodRegistryTest, CheckWeTestUpToMaxOrder)
+{
+    using MeshElementType = TypeParam;
+
+    using IntegrationPolicy =
+        NumLib::GaussLegendreIntegrationPolicy<MeshElementType>;
+    using NonGenericIntegrationMethod =
+        typename IntegrationPolicy::IntegrationMethod;
+
+    unsigned const cutoff = 100;  // Way beyond everything we ever expect.
+    unsigned const order =
+        getMaximumIntegrationOrderOfTemplatedIntegrationMethod<
+            NonGenericIntegrationMethod>(cutoff);
+
+    ASSERT_GE(this->max_order, order)
+        << "The maximum integration order used in this unit test suite is "
+           "smaller than the (apparent) maximum integration order of the "
+           "current integration method. Either we forgot to set the proper "
+           "integration order in this unit test suite or the determination of "
+           "the maximum integration order in the current unit test is wrong.";
+}
+
+// Assert that the integration method registry contains all integration orders
+// of the underlying integration methods.
+TYPED_TEST(NumLibIntegrationMethodRegistryTest, MaxOrderFromRegistry)
+{
+    using MeshElementType = TypeParam;
+
+    unsigned const cutoff = 100;  // Way beyond everything we ever expect.
+    unsigned const order =
+        getMaximumIntegrationOrderFromIntegrationMethodRegistry<
+            MeshElementType>(cutoff);
+
+    ASSERT_EQ(this->max_order, order)
+        << "The maximum integration order tested in this unit test suite "
+           "differs from the maximum integration order deposited in the "
+           "integration method registry for the current mesh element type";
+}

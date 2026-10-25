@@ -1,0 +1,114 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <iosfwd>
+#include <list>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "Applications/FileIO/Gmsh/GMSHPoint.h"
+#include "BaseLib/IO/Writer.h"
+
+namespace GeoLib
+{
+class GEOObjects;
+class Polygon;
+}  // namespace GeoLib
+
+namespace FileIO
+{
+
+namespace GMSH
+{
+
+class GMSHPolygonTree;
+class GMSHMeshDensityStrategy;
+
+enum class MeshDensityAlgorithm
+{
+    FixedMeshDensity,    //!< set the parameter with a fixed value
+    AdaptiveMeshDensity  //!< computing the mesh density employing a QuadTree
+};
+
+/**
+ * \brief Reads and writes GMSH-files to and from OGS data structures.
+ */
+class GMSHInterface final : public BaseLib::IO::Writer
+{
+public:
+    /**
+     * @param geo_objs reference to instance of class GEOObject that maintains
+     * the geometries.
+     *     The instance is used for preparation geometries for writing them to
+     * the gmsh file format.
+     * @param include_stations_as_constraints switch to enable writing stations
+     * as constraints
+     * @param mesh_density_algorithm one of the mesh density algorithms (\@see
+     * enum MeshDensityAlgorithm)
+     * @param pnt_density parameter of the mesh density algorithm
+     * @param station_density parameter of the mesh density algorithm
+     * @param max_pnts_per_leaf parameter of the mesh density algorithm
+     * @param selected_geometries vector of names of geometries, that should be
+     * employed for mesh generation.
+     * @param rotate if the value of the parameter is true then the input points
+     * will be rotated on the \f$x\f$-\f$y\f$-plane, else the input points will
+     * be (orthogonal) projected to the \f$x\f$-\f$y\f$-plane.
+     * @param keep_preprocessed_geometry keep the pre-processed geometry, useful
+     * for debugging the mesh creation
+     */
+    GMSHInterface(GeoLib::GEOObjects& geo_objs,
+                  bool include_stations_as_constraints,
+                  GMSH::MeshDensityAlgorithm mesh_density_algorithm,
+                  double pnt_density, double station_density,
+                  std::size_t max_pnts_per_leaf,
+                  std::vector<std::string> const& selected_geometries,
+                  bool rotate, bool keep_preprocessed_geometry);
+
+    GMSHInterface(GMSHInterface const&) = delete;
+    GMSHInterface(GMSHInterface&&) = delete;
+    GMSHInterface& operator=(GMSHInterface const&) = delete;
+    GMSHInterface& operator=(GMSHInterface&&) = delete;
+
+    ~GMSHInterface() override;
+
+    void writePhysicalGroups(bool flag) { _write_physical_groups = flag; }
+
+protected:
+    bool write() override;
+
+private:
+    /**
+     * 1. get and merge data from _geo_objs
+     * 2. compute topological hierarchy
+     * @param out
+     * @todo activate error codes and hand them on to the Writer class,
+     * i.e. 0 = okay, 1 = geo_objects is empty, 2 = error while merging,
+     * 3 = error writing file
+     */
+    int writeGMSHInputFile(std::ostream& out);
+
+    std::size_t _n_lines = 0;
+    std::size_t _n_plane_sfc = 0;
+
+    GeoLib::GEOObjects& _geo_objs;
+    std::vector<std::string> const& _selected_geometries;
+    std::string _gmsh_geo_name;
+    std::list<GMSH::GMSHPolygonTree*> _polygon_tree_list;
+
+    std::vector<GMSH::GMSHPoint*> _gmsh_pnts;
+
+    std::unique_ptr<GMSH::GMSHMeshDensityStrategy> _mesh_density_strategy;
+    /// Holds the inverse rotation matrix. The matrix is used to
+    /// revert the rotation done in writeGMSHInputFile().
+    Eigen::Matrix3d _inverse_rot_mat = Eigen::Matrix3d::Zero();
+    /// Signals if the input points should be rotated or projected to the
+    /// \f$x\f$-\f$y\f$-plane
+    bool const _rotate = false;
+    bool _keep_preprocessed_geometry = true;
+    bool _write_physical_groups = false;
+};
+}  // end namespace GMSH
+}  // end namespace FileIO

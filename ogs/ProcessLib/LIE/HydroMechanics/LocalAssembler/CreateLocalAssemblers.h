@@ -1,0 +1,95 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <vector>
+
+#include "BaseLib/Logging.h"
+#include "LocalDataInitializer.h"
+#include "NumLib/DOF/LocalToGlobalIndexMap.h"
+
+namespace ProcessLib
+{
+namespace LIE
+{
+namespace HydroMechanics
+{
+namespace detail
+{
+template <int DisplacementDim,
+          template <typename, typename, int>
+          class LocalAssemblerMatrixImplementation,
+          template <typename, typename, int>
+          class LocalAssemblerMatrixNearFractureImplementation,
+          template <typename, typename, int>
+          class LocalAssemblerFractureImplementation,
+          typename LocalAssemblerInterface, typename... ExtraCtorArgs>
+void createLocalAssemblers(
+    NumLib::LocalToGlobalIndexMap const& dof_table,
+    std::vector<MeshLib::Element*> const& mesh_elements,
+    std::vector<std::unique_ptr<LocalAssemblerInterface>>& local_assemblers,
+    NumLib::IntegrationOrder const integration_order,
+    ExtraCtorArgs&&... extra_ctor_args)
+{
+    // Shape matrices initializer
+    using LocalDataInitializer =
+        LocalDataInitializer<LocalAssemblerInterface,
+                             LocalAssemblerMatrixImplementation,
+                             LocalAssemblerMatrixNearFractureImplementation,
+                             LocalAssemblerFractureImplementation,
+                             DisplacementDim, ExtraCtorArgs...>;
+
+    DBUG("Create local assemblers.");
+    // Populate the vector of local assemblers.
+    local_assemblers.resize(mesh_elements.size());
+
+    LocalDataInitializer initializer(dof_table, integration_order);
+
+    DBUG("Calling local assembler builder for all mesh elements.");
+    GlobalExecutor::transformDereferenced(
+        initializer, mesh_elements, local_assemblers,
+        std::forward<ExtraCtorArgs>(extra_ctor_args)...);
+}
+
+}  // namespace detail
+
+/*! Creates local assemblers for each element of the given \c mesh.
+ *
+ * \tparam LocalAssemblerImplementation the individual local assembler type
+ * \tparam LocalAssemblerInterface the general local assembler interface
+ * \tparam ExtraCtorArgs types of additional constructor arguments.
+ *         Those arguments will be passed to the constructor of
+ *         \c LocalAssemblerImplementation.
+ *
+ * The first two template parameters cannot be deduced from the arguments.
+ * Therefore they always have to be provided manually.
+ */
+template <int DisplacementDim,
+          template <typename, typename, int>
+          class LocalAssemblerMatrixImplementation,
+          template <typename, typename, int>
+          class LocalAssemblerMatrixNearFractureImplementation,
+          template <typename, typename, int>
+          class LocalAssemblerFractureImplementation,
+          typename LocalAssemblerInterface, typename... ExtraCtorArgs>
+void createLocalAssemblers(
+    std::vector<MeshLib::Element*> const& mesh_elements,
+    NumLib::LocalToGlobalIndexMap const& dof_table,
+    std::vector<std::unique_ptr<LocalAssemblerInterface>>& local_assemblers,
+    NumLib::IntegrationOrder const integration_order,
+    ExtraCtorArgs&&... extra_ctor_args)
+{
+    DBUG("Create local assemblers.");
+
+    detail::createLocalAssemblers<
+        DisplacementDim, LocalAssemblerMatrixImplementation,
+        LocalAssemblerMatrixNearFractureImplementation,
+        LocalAssemblerFractureImplementation>(
+        dof_table, mesh_elements, local_assemblers, integration_order,
+        std::forward<ExtraCtorArgs>(extra_ctor_args)...);
+}
+
+}  // namespace HydroMechanics
+}  // namespace LIE
+}  // namespace ProcessLib

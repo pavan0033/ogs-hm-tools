@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "PythonSourceTerm.h"
+
+#include <algorithm>
+#include <pybind11/pybind11.h>
+
+#include <iostream>
+
+#include "FlushStdoutGuard.h"
+#include "MeshLib/MeshSearch/NodeSearch.h"
+#include "NumLib/DOF/LocalToGlobalIndexMap.h"
+#include "ProcessLib/BoundaryConditionAndSourceTerm/Python/Utils/CreateLocalAssemblers.h"
+#include "PythonSourceTermLocalAssembler.h"
+
+namespace ProcessLib
+{
+namespace SourceTerms
+{
+namespace Python
+{
+PythonSourceTerm::PythonSourceTerm(
+    std::unique_ptr<NumLib::LocalToGlobalIndexMap> source_term_dof_table,
+    PythonStData&& source_term_data, unsigned const integration_order,
+    unsigned const global_dim, bool const flush_stdout)
+    : SourceTerm(std::move(source_term_dof_table)),
+      _source_term_data(std::move(source_term_data)),
+      _flush_stdout(flush_stdout)
+{
+    BoundaryConditionAndSourceTerm::createLocalAssemblersPython<
+        PythonSourceTermLocalAssembler>(
+        global_dim, _source_term_data.bc_or_st_mesh.getElements(),
+        *_source_term_dof_table, _local_assemblers,
+        NumLib::IntegrationOrder{integration_order},
+        _source_term_data.bc_or_st_mesh.isAxiallySymmetric(),
+        _source_term_data);
+}
+
+void PythonSourceTerm::integrate(const double t, const GlobalVector& x,
+                                 GlobalVector& b, GlobalMatrix* Jac) const
+{
+    FlushStdoutGuard guard(_flush_stdout);
+
+    try
+    {
+        GlobalExecutor::executeMemberOnDereferenced(
+            &PythonSourceTermLocalAssemblerInterface::assemble,
+            _local_assemblers, *_source_term_dof_table, t, x, b, Jac);
+    }
+    catch (pybind11::error_already_set const& e)
+    {
+        OGS_FATAL("Error evaluating source term in Python: {}", e.what());
+    }
+}
+
+}  // namespace Python
+}  // namespace SourceTerms
+}  // namespace ProcessLib

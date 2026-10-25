@@ -1,0 +1,84 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "MatrixTranslator.h"
+
+#include "MathLib/LinAlg/LinAlg.h"
+
+namespace NumLib
+{
+void MatrixTranslatorGeneral<ODESystemTag::FirstOrderImplicitQuasilinear>::
+    computeA(GlobalMatrix const& M, GlobalMatrix const& K,
+             GlobalMatrix& A) const
+{
+    namespace LinAlg = MathLib::LinAlg;
+
+    double const dt = _time_disc.getCurrentTimeIncrement();
+
+    // A = M * 1/dt + K
+    LinAlg::copy(K, A);
+    LinAlg::axpy(A, 1. / dt, M);
+}
+
+void MatrixTranslatorGeneral<ODESystemTag::FirstOrderImplicitQuasilinear>::
+    computeRhs(const GlobalMatrix& M, const GlobalMatrix& /*K*/,
+               const GlobalVector& b, const GlobalVector& x_prev,
+               GlobalVector& rhs) const
+{
+    namespace LinAlg = MathLib::LinAlg;
+
+    auto& tmp = NumLib::GlobalVectorProvider::provider.getVector(_tmp_id);
+    _time_disc.getWeightedOldX(tmp, x_prev);
+
+    // rhs = M * weighted_old_x + b
+    LinAlg::matMultAdd(M, tmp, b, rhs);
+
+    NumLib::GlobalVectorProvider::provider.releaseVector(tmp);
+}
+
+void MatrixTranslatorGeneral<ODESystemTag::FirstOrderImplicitQuasilinear>::
+    normalizeAandRhs(GlobalMatrix& A, GlobalVector& b) const
+{
+    namespace LinAlg = MathLib::LinAlg;
+
+    // check whether A is square?
+
+    GlobalMatrix new_A(A);
+    GlobalVector new_b(b);
+    LinAlg::copy(A, new_A);
+    LinAlg::copy(b, new_b);
+    // rhs = A^T * rhs
+    // A = A^T * A
+    LinAlg::linearSysNormalize(A, new_A, b, new_b);
+
+    LinAlg::copy(new_A, A);
+    LinAlg::copy(new_b, b);
+}
+
+void MatrixTranslatorGeneral<ODESystemTag::FirstOrderImplicitQuasilinear>::
+    computeResidual(GlobalMatrix const& M, GlobalMatrix const& K,
+                    GlobalVector const& b, double const dt,
+                    GlobalVector const& x_curr, GlobalVector const& x_prev,
+                    GlobalVector& res) const
+{
+    namespace LinAlg = MathLib::LinAlg;
+
+    // res = M * x_dot + K * x_curr - b
+    GlobalVector x_dot;
+    LinAlg::copy(x_curr, x_dot);              // x_dot = x
+    LinAlg::axpy(x_dot, -1., x_prev);         // x_dot = x - x_prev
+    LinAlg::scale(x_dot, 1. / dt);            // x_dot = (x - x_prev)/dt
+    LinAlg::matMult(M, x_dot, res);           // res = M*x_dot
+    LinAlg::matMultAdd(K, x_curr, res, res);  // res = M*x_dot + K*x
+    LinAlg::axpy(res, -1., b);                // res = M*x_dot + X*x - b
+}
+
+void MatrixTranslatorGeneral<ODESystemTag::FirstOrderImplicitQuasilinear>::
+    computeJacobian(GlobalMatrix const& Jac_in, GlobalMatrix& Jac_out) const
+{
+    namespace LinAlg = MathLib::LinAlg;
+
+    LinAlg::copy(Jac_in, Jac_out);
+}
+
+}  // namespace NumLib

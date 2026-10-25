@@ -1,0 +1,124 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <vtkNew.h>
+#include <vtkSmartPointer.h>
+#include <vtkUnstructuredGrid.h>
+
+#include "BaseLib/Logging.h"
+#include "MeshLib/Mesh.h"
+#include "MeshLib/Vtk/VtkMappedMeshSource.h"
+#include "VtuInterface.h"
+
+#ifdef USE_PETSC
+#include <mpi.h>
+#include <vtkMPI.h>
+#include <vtkMPICommunicator.h>
+#include <vtkMPIController.h>
+
+#include "BaseLib/MPI.h"
+#endif
+
+class vtkXMLPUnstructuredGridWriter;
+
+namespace MeshLib
+{
+namespace IO
+{
+template <typename UnstructuredGridWriter>
+bool VtuInterface::writeVTU(std::string const& file_name,
+                            [[maybe_unused]] const int num_partitions,
+                            [[maybe_unused]] const int rank)
+{
+    if (!_mesh)
+    {
+        ERR("VtuInterface::write(): No mesh specified.");
+        return false;
+    }
+
+#ifdef USE_PETSC
+    if (_mesh->getProperties().existsPropertyVector<unsigned char>(
+            vtkGhostTypeString, MeshLib::MeshItemType::Cell, 1))
+    {
+        if (_output_variable_names.find(std::string(vtkGhostTypeString)) ==
+            _output_variable_names.cend())
+        {
+            _output_variable_names.insert(vtkGhostTypeString);
+        }
+    }
+    else
+    {
+        DBUG(
+            "No '{}' data in mesh '{}'.", vtkGhostTypeString, _mesh->getName());
+    }
+#endif
+
+    vtkNew<MeshLib::VtkMappedMeshSource> vtkSource;
+    vtkSource->SetMesh(_mesh);
+    vtkSource->setOutputVariableNames(_output_variable_names);
+
+    vtkSmartPointer<UnstructuredGridWriter> vtuWriter =
+        vtkSmartPointer<UnstructuredGridWriter>::New();
+
+    vtkSource->Update();
+    vtuWriter->SetInputData(vtkSource->GetOutput());
+
+    if (_use_compressor)
+    {
+        vtuWriter->SetCompressorTypeToZLib();
+    }
+    else
+    {
+        vtuWriter->SetCompressorTypeToNone();
+    }
+
+    vtuWriter->SetDataMode(_data_mode);
+    if (_data_mode == vtkXMLWriter::Appended)
+    {
+        vtuWriter->SetEncodeAppendedData(1);
+    }
+    if (_data_mode == vtkXMLWriter::Ascii)
+    {
+        vtkSource->Update();
+        vtkSmartPointer<vtkUnstructuredGrid> tempGrid =
+            vtkSmartPointer<vtkUnstructuredGrid>::New();
+        tempGrid->DeepCopy(vtkSource->GetOutput());
+        vtuWriter->SetInputDataObject(tempGrid);
+    }
+
+    vtuWriter->SetFileName(file_name.c_str());
+
+#ifdef USE_PETSC
+    if constexpr (std::is_same_v<UnstructuredGridWriter,
+                                 vtkXMLPUnstructuredGridWriter>)
+    {
+        // Set the writer controller to same communicator as OGS
+        vtkSmartPointer<vtkMPICommunicator> vtk_comm =
+            vtkSmartPointer<vtkMPICommunicator>::New();
+        MPI_Comm mpi_comm = BaseLib::MPI::OGS_COMM_WORLD;
+        vtkMPICommunicatorOpaqueComm vtk_opaque_comm(&mpi_comm);
+        vtk_comm->InitializeExternal(&vtk_opaque_comm);
+
+        vtkSmartPointer<vtkMPIController> vtk_mpi_ctrl =
+            vtkSmartPointer<vtkMPIController>::New();
+        vtk_mpi_ctrl->SetCommunicator(vtk_comm);
+
+        vtuWriter->SetController(vtk_mpi_ctrl);
+
+        vtuWriter->SetGhostLevel(1);
+        vtuWriter->SetNumberOfPieces(num_partitions);
+        vtuWriter->SetStartPiece(rank);
+        vtuWriter->SetEndPiece(rank);
+    }
+#endif
+
+#ifdef VTK_USE_64BIT_IDS
+    vtuWriter->SetHeaderTypeToUInt64();
+    // set SetIdTypeToInt64() as well?
+#endif
+
+    return (vtuWriter->Write() > 0);
+}
+
+}  // end namespace IO
+}  // end namespace MeshLib

@@ -1,0 +1,403 @@
+# Update with `git shortlog -sne`
+
+cff-version: 1.2.0
+title: OpenGeoSys
+message: >-
+    If you use this software, please cite it using these
+    metadata.
+type: software
+authors:
+    - given-names: Dmitri
+      family-names: Naumov
+      name-particle: Yu.
+      orcid: "https://orcid.org/0000-0001-6680-1028"
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Lars
+      family-names: Bilke
+      orcid: "https://orcid.org/0000-0001-8986-2413"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Thomas
+      family-names: Fischer
+      orcid: "https://orcid.org/0000-0002-1071-3464"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Christoph
+      family-names: Lehmann
+      orcid: "https://orcid.org/0000-0001-7936-9852"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Wenqing
+      family-names: Wang
+      orcid: "https://orcid.org/0000-0001-8909-6245"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Karsten
+      family-names: Rink
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Norihiro
+      family-names: Watanabe
+      affiliation: AIST
+    - given-names: Renchao
+      family-names: Lu
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Jörg
+      family-names: Buchwald
+      orcid: "https://orcid.org/0000-0001-5174-3603"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Norbert
+      family-names: Grunwald
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Tobias
+      family-names: Meisel
+      orcid: "https://orcid.org/0009-0009-8790-8903"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Florian
+      family-names: Zill
+      orcid: "https://orcid.org/0000-0002-5177-401X"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Chaofan
+      family-names: Chen
+      orcid: "https://orcid.org/0000-0003-2019-3439"
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Christian
+      family-names: Silbermann
+      orcid: "https://orcid.org/0000-0002-5474-0165"
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Thomas
+      family-names: Nagel
+      orcid: "https://orcid.org/0000-0001-8459-4616"
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Feliks K.
+      family-names: Kiszkurno
+      orcid: "https://orcid.org/0000-0003-3304-4838"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Jäschke
+      family-names: Max
+      affiliation: "Hochschule für Technik, Wirtschaft und Kultur Leipzig"
+    - given-names: Haibing
+      family-names: Shao
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Yonghui
+      family-names: Huang
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Boyan
+      family-names: Meng
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Jasper
+      family-names: Bathmann
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Shuang
+      family-names: Chen
+      affiliation: >-
+          Bundesanstalt für Geowissenschaften und Rohstoffe -- BGR
+    - given-names: Julian
+      family-names: Heinze
+      oricd: "https://orcid.org/0009-0004-3449-8852"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Jan
+      family-names: Thiedau
+      affiliation: >-
+          Bundesanstalt für Geowissenschaften und Rohstoffe --
+          BGR
+    - given-names: Keita
+      family-names: Yoshioka
+      orcid: "https://orcid.org/0000-0001-7518-6952"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Dominik
+      family-names: Kern
+      orcid: "https://orcid.org/0000-0002-1958-2982"
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Francesco
+      family-names: Parisio
+      affiliation: CSIC
+    - given-names: Jaime
+      family-names: Rodriguez
+      name-particle: Garibay
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Mostafa
+      family-names: Mollaali
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Xingyuan
+      family-names: Miao
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Tao
+      family-names: You
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Tymofiy
+      family-names: Gerasimov
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Sonja
+      family-names: Kaiser
+      orcid: "https://orcid.org/0000-0001-8724-5024"
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Johannes
+      family-names: Boog
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Kristof
+      family-names: Kessler
+      affiliation: >-
+          Bundesanstalt für Geowissenschaften und Rohstoffe --
+          BGR
+    - given-names: Marc
+      family-names: Walther
+      affiliation: TU Dresden
+    - given-names: Tianyuan
+      family-names: Zheng
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Loer
+      family-names: Frieder
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Florian
+      family-names: Berger
+      affiliation: >-
+          Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Jakob
+      family-names: Randow
+      affiliation: "Hochschule für Technik, Wirtschaft und Kultur Leipzig"
+    - given-names: Robert
+      family-names: Habel
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Zhang
+      family-names: Ning
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Jérémie
+      family-names: Lagraviere
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Kata
+      family-names: Kurgyis
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Linda
+      family-names: Günther
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Philipp
+      family-names: Selzer
+      orcid: "https://orcid.org/0000-0001-9995-3634"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Steffen
+      family-names: Beese
+      affiliation: >-
+          Bundesanstalt für Geowissenschaften und Rohstoffe --
+          BGR
+    - given-names: Thorben
+      family-names: Stehling
+      affiliation: >-
+          Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Vahid Ziaei
+      family-names: Rad
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Eric
+      family-names: Simo
+      affiliation: BGE TECHNOLOGY GmbH
+    - given-names: Noor
+      family-names: Hasan
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Vanessa
+      family-names: Montoya
+      orcid: "https://orcid.org/0000-0002-4751-3597"
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Eike
+      family-names: Radeisen
+      affiliation: >-
+          Bundesanstalt für Geowissenschaften und Rohstoffe --
+          BGR
+    - given-names: Falko
+      family-names: Vehling
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Joy
+      family-names: Brato Shil
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Sophie
+      family-names: Einspänner
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Aqeel
+      family-names: Chaudhry
+      orcid: "https://orcid.org/0000-0003-1051-9335"
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Carolin
+      family-names: Helbig
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Francesco
+      family-names: Witte
+      affiliation: Hochschule Flensburg
+    - given-names: Ludovic
+      familiy-names: Aubry
+      affiliation: French Alternative Energies and Atomic Energy Commission (CEA)
+    - given-names: Maximilian
+      familiy-names: Dörnbrack
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Mehran
+      family-names: Ghasabeh
+      orcid: "https://orcid.org/0000-0003-3970-3224"
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Olaf
+      family-names: Kolditz
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+      orcid: "https://orcid.org/0000-0002-8098-4905"
+    - given-names: Reza
+      family-names: Taher Dang Koo
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Thomas
+      family-names: Kalbacher
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Wanlong
+      family-names: Cai
+    - given-names: Alireza
+      family-names: Hassanzadegan
+    - given-names: Hailong
+      familiy-names: Sheng
+    - given-names: Johannes
+      family-names: Herfurth
+      affiliation: >-
+          Bundesanstalt für Geowissenschaften und Rohstoffe --
+          BGR
+    - given-names: Lion
+      family-names: Ahrendt
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Matthes
+      family-names: Kantzenbach
+      affiliation: Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Michael
+      family-names: Pitz
+      affiliation: >-
+          Bundesanstalt für Geowissenschaften und Rohstoffe --
+          BGR
+    - given-names: Myles
+      family-names: English
+    - given-names: Tuanny
+      family-names: Cajuhi
+      affiliation: >-
+          Bundesanstalt für Geowissenschaften und Rohstoffe --
+          BGR
+    - given-names: Luca
+      family-names: Urpi
+    - given-names: Jan
+      family-names: Tecklenburg
+      affiliation: >-
+          Bundesanstalt für Geowissenschaften und Rohstoffe --
+          BGR
+    - given-names: Devansh
+      family-names: Shukla
+      affiliation: >-
+          Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Linus
+      family-names: Walter
+      orcid: "https://orcid.org/0000-0002-6686-9556"
+      affiliation: >-
+          Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Leonard
+      family-names: Grabow
+      orcid: "https://orcid.org/0000-0003-3763-0797"
+      affiliation: >-
+          Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Kunqing
+      family-names: Jiang
+      affiliation: >-
+          Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Hannah
+      family-names: Keese
+      affiliation: TU Bergakademie Freiberg
+    - given-names: Matthias
+      family-names: Bernt
+      orcid: "https://orcid.org/0000-0003-3763-0797"
+      affiliation: >-
+          Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Niklas
+      family-names: Ritter
+      affiliation: >-
+          Helmholtz Centre for Environmental Research -- UFZ
+    - given-names: Joan
+      family-names: Larrahondo
+      orcid: "https://orcid.org/0000-0002-3681-3383"
+      affiliation: >-
+          Pontificia Universidad Javeriana
+identifiers:
+    - type: doi
+      value: 10.5281/zenodo.22816213
+      description: Zenodo DOI for 6.5.9
+    - type: doi
+      value: 10.5281/zenodo.20269146
+      description: Zenodo DOI for 6.5.8
+    - type: doi
+      value: 10.5281/zenodo.18468476
+      description: Zenodo DOI for 6.5.7
+    - type: doi
+      value: 10.5281/zenodo.17162299
+      description: Zenodo DOI for 6.5.6
+    - type: doi
+      value: 10.5281/zenodo.15496721
+      description: Zenodo DOI for 6.5.5
+    - type: doi
+      value: 10.5281/zenodo.14672997
+      description: Zenodo DOI for 6.5.4
+    - type: doi
+      value: 10.5281/zenodo.13685289
+      description: Zenodo DOI for 6.5.3
+    - type: doi
+      value: 10.5281/zenodo.11652195
+      description: Zenodo DOI for 6.5.2
+    - type: doi
+      value: 10.5281/zenodo.10890088
+      description: Zenodo DOI for 6.5.1
+    - type: doi
+      value: 10.5281/zenodo.2600042
+      description: Zenodo DOI for 6.5.0
+    - type: doi
+      value: 10.5281/zenodo.7716938
+      description: Zenodo DOI for 6.4.4
+    - type: doi
+      value: 10.5281/zenodo.7092676
+      description: Zenodo DOI for 6.4.3
+    - type: doi
+      value: 10.5281/zenodo.6405711
+      description: Zenodo DOI for 6.4.2
+    - type: doi
+      value: 10.5281/zenodo.5562297
+      description: Zenodo DOI for 6.4.1
+    - type: doi
+      value: 10.5281/zenodo.4657103
+      description: Zenodo DOI for 6.4.0
+    - type: doi
+      value: 10.5281/zenodo.4360614
+      description: Zenodo DOI for 6.3.3
+    - type: doi
+      value: 10.5281/zenodo.3948324
+      description: Zenodo DOI for 6.3.2
+    - type: doi
+      value: 10.5281/zenodo.3901385
+      description: Zenodo DOI for 6.3.1
+    - type: doi
+      value: 10.5281/zenodo.3706901
+      description: Zenodo DOI for 6.3.0
+    - type: doi
+      value: 10.5281/zenodo.3597561
+      description: Zenodo DOI for 6.2.2
+    - type: doi
+      value: 10.5281/zenodo.3367100
+      description: Zenodo DOI for 6.2.1
+    - type: doi
+      value: 10.5281/zenodo.2600045
+      description: Zenodo DOI for 6.2.0
+    - type: doi
+      value: 10.5281/zenodo.1145843
+      description: Zenodo DOI for 6.1.0
+    - type: doi
+      value: 10.5281/zenodo.444838
+      description: Zenodo DOI for 6.0.8
+    - type: doi
+      value: 10.5281/zenodo.57062
+      description: Zenodo DOI for 6.0.6
+    - type: doi
+      value: 10.5281/zenodo.49710
+      description: Zenodo DOI for 6.0.5
+    - type: doi
+      value: 10.5281/zenodo.44344
+      description: Zenodo DOI for 6.0.4
+    - type: doi
+      value: 10.5281/zenodo.31273
+      description: Zenodo DOI for 6.0.3
+    - type: doi
+      value: 10.5281/zenodo.27429
+      description: Zenodo DOI for 6.0.2
+repository-code: "https://github.com/ufz/ogs"
+url: "https://www.opengeosys.org"
+license: BSD-3-Clause
+version: 6.5.2
+date-released: "2024-06-14"
+doi: 10.5281/zenodo.591265

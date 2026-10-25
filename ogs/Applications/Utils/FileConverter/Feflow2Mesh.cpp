@@ -1,0 +1,95 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <tclap/CmdLine.h>
+
+#include <memory>
+#include <string>
+
+#include "BaseLib/FileTools.h"
+#include "BaseLib/Logging.h"
+#include "BaseLib/MPI.h"
+#include "BaseLib/RunTime.h"
+#include "BaseLib/TCLAPArguments.h"
+#include "InfoLib/GitInfo.h"
+#ifndef WIN32
+#include "BaseLib/MemWatch.h"
+#endif
+
+// FileIO
+#include "Applications/FileIO/FEFLOW/FEFLOWMeshInterface.h"
+#include "MeshLib/IO/Legacy/MeshIO.h"
+#include "MeshLib/IO/VtkIO/VtuInterface.h"
+#include "MeshLib/IO/writeMeshToFile.h"
+#include "MeshLib/Mesh.h"
+
+int main(int argc, char* argv[])
+{
+    TCLAP::CmdLine cmd(
+        "Converting a mesh in FEFLOW file format (ASCII, version 5.4) to a vtk "
+        "unstructured grid file (new OGS file format) or to the old OGS file "
+        "format - see options.\n\n"
+        "OpenGeoSys-6 software, version " +
+            GitInfoLib::GitInfo::ogs_version +
+            ".\n"
+            "Copyright (c) 2012-2026, OpenGeoSys Community "
+            "(http://www.opengeosys.org)",
+        ' ', GitInfoLib::GitInfo::ogs_version);
+
+    TCLAP::ValueArg<std::string> ogs_mesh_arg(
+        "o",
+        "out",
+        "Output. Filename for output mesh (if extension is msh, old OGS file "
+        "format is "
+        "written)",
+        true,
+        "",
+        "OUTPUT_FILE");
+    cmd.add(ogs_mesh_arg);
+
+    TCLAP::ValueArg<std::string> feflow_mesh_arg(
+        "i", "in", "Input (.fem). FEFLOW input file", true, "", "INPUT_FILE");
+    cmd.add(feflow_mesh_arg);
+
+    auto log_level_arg = BaseLib::makeLogLevelArg();
+    cmd.add(log_level_arg);
+    cmd.parse(argc, argv);
+
+    BaseLib::MPI::Setup mpi_setup(argc, argv);
+    BaseLib::initOGSLogger(log_level_arg.getValue());
+
+    // *** read mesh
+    INFO("Reading {:s}.", feflow_mesh_arg.getValue());
+#ifndef WIN32
+    BaseLib::MemWatch mem_watch;
+    unsigned long mem_without_mesh(mem_watch.getVirtMemUsage());
+#endif
+    BaseLib::RunTime run_time;
+    run_time.start();
+    FileIO::FEFLOWMeshInterface feflowIO;
+    std::unique_ptr<MeshLib::Mesh const> mesh(
+        feflowIO.readFEFLOWFile(feflow_mesh_arg.getValue()));
+
+    if (mesh == nullptr)
+    {
+        INFO("Could not read mesh from {:s}.", feflow_mesh_arg.getValue());
+        return EXIT_FAILURE;
+    }
+#ifndef WIN32
+    unsigned long mem_with_mesh(mem_watch.getVirtMemUsage());
+    INFO("Mem for mesh: {} MiB",
+         (mem_with_mesh - mem_without_mesh) / (1024 * 1024));
+#endif
+    INFO("Time for reading: {:f} seconds.", run_time.elapsed());
+    INFO("Read {:d} nodes and {:d} elements.", mesh->getNumberOfNodes(),
+         mesh->getNumberOfElements());
+
+    std::string ogs_mesh_fname(ogs_mesh_arg.getValue());
+    INFO("Writing {:s}.", ogs_mesh_fname);
+    if (MeshLib::IO::writeMeshToFile(*mesh, ogs_mesh_fname) != 0)
+    {
+        return EXIT_FAILURE;
+    }
+    INFO("\tDone.");
+    return EXIT_SUCCESS;
+}

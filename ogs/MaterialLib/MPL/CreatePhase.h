@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace BaseLib
+{
+class ConfigTree;
+}
+namespace ParameterLib
+{
+struct ParameterBase;
+struct CoordinateSystem;
+}  // namespace ParameterLib
+namespace MaterialPropertyLib
+{
+class Phase;
+}
+namespace MathLib
+{
+class PiecewiseLinearInterpolation;
+}
+
+namespace MaterialPropertyLib
+{
+/// A method that parses the phase details and stores them in the private
+/// phases_ member.
+///
+/// This method creates the phases of the medium. Unlike a medium, a phase may
+/// have a name. However, this is silly at the moment since this name still has
+/// no effect (except of some benefits in regard of readability).
+/// Phase components are required (a phase consists of at least one component).
+/// Phase properties are optional. If not given, default properties are
+/// assigned. These default properties average the component properties,
+/// weighted by mole fraction.
+std::vector<std::unique_ptr<Phase>> createPhases(
+    int const geometry_dimension,
+    std::optional<BaseLib::ConfigTree> const& config,
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>>& parameters,
+    ParameterLib::CoordinateSystem const* const local_coordinate_system,
+    std::map<std::string,
+             std::unique_ptr<MathLib::PiecewiseLinearInterpolation>> const&
+        curves);
+}  // namespace MaterialPropertyLib

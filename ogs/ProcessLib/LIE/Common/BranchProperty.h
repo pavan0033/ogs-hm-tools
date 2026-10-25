@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <Eigen/Core>
+
+#include "MeshLib/Node.h"
+
+namespace ProcessLib
+{
+namespace LIE
+{
+struct BranchProperty final
+{
+    BranchProperty(MeshLib::Node const& branchNode,
+                   int const master_fracture_id_,
+                   int const slave_fracture_id_)
+        : coords{branchNode.data()},
+          node_id{branchNode.getID()},
+          master_fracture_id{master_fracture_id_},
+          slave_fracture_id{slave_fracture_id_}
+    {
+    }
+
+    Eigen::Vector3d const coords;
+    // unit vector normal to the master fracture in a direction to the slave
+    Eigen::Vector3d normal_vector_branch;
+    std::size_t const node_id;
+    int const master_fracture_id;
+    int const slave_fracture_id;
+
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+};
+
+}  // namespace LIE
+}  // namespace ProcessLib

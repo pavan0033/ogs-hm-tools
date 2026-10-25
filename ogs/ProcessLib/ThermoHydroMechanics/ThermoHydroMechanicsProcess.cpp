@@ -1,0 +1,530 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "ThermoHydroMechanicsProcess.h"
+
+#include <cassert>
+
+#include "MeshLib/Elements/Utils.h"
+#include "MeshLib/Utils/getOrCreateMeshProperty.h"
+#include "NumLib/DOF/ComputeSparsityPattern.h"
+#include "ProcessLib/Deformation/SolidMaterialInternalToSecondaryVariables.h"
+#include "ProcessLib/Process.h"
+#include "ProcessLib/Utils/CreateLocalAssemblersTaylorHood.h"
+#include "ProcessLib/Utils/SetIPDataInitialConditions.h"
+#include "ThermoHydroMechanicsFEM.h"
+#include "ThermoHydroMechanicsProcessData.h"
+
+namespace ProcessLib
+{
+namespace ThermoHydroMechanics
+{
+template <int DisplacementDim>
+ThermoHydroMechanicsProcess<DisplacementDim>::ThermoHydroMechanicsProcess(
+    std::string name, MeshLib::Mesh& mesh,
+    std::unique_ptr<ProcessLib::AbstractJacobianAssembler>&& jacobian_assembler,
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    unsigned const integration_order,
+    std::vector<std::vector<std::reference_wrapper<ProcessVariable>>>&&
+        process_variables,
+    ThermoHydroMechanicsProcessData<DisplacementDim>&& process_data,
+    SecondaryVariableCollection&& secondary_variables,
+    bool const use_monolithic_scheme, bool const is_linear)
+    : Process(std::move(name), mesh, std::move(jacobian_assembler), parameters,
+              integration_order, std::move(process_variables),
+              std::move(secondary_variables), use_monolithic_scheme),
+      AssemblyMixin<ThermoHydroMechanicsProcess<DisplacementDim>>{
+          *_jacobian_assembler, is_linear, use_monolithic_scheme},
+      _process_data(std::move(process_data))
+
+{
+    // For numerical Jacobian
+    if (this->_jacobian_assembler->needsPicardAssembly())
+    {
+        OGS_FATAL(
+            "Numerical Jacobian is not supported for the "
+            "ThermoHydroMechanicsProcess yet.");
+    }
+
+    _integration_point_writer.emplace_back(
+        std::make_unique<MeshLib::IntegrationPointWriter>(
+            "sigma_ip",
+            static_cast<int>(mesh.getDimension() == 2 ? 4 : 6) /*n components*/,
+            integration_order, local_assemblers_,
+            &LocalAssemblerInterface<DisplacementDim>::getSigma));
+
+    _integration_point_writer.emplace_back(
+        std::make_unique<MeshLib::IntegrationPointWriter>(
+            "sigma_ice_ip",
+            static_cast<int>(mesh.getDimension() == 2 ? 4 : 6) /*n components*/,
+            integration_order, local_assemblers_,
+            &LocalAssemblerInterface<DisplacementDim>::getSigmaIce));
+
+    _integration_point_writer.emplace_back(
+        std::make_unique<MeshLib::IntegrationPointWriter>(
+            "ice_volume_fraction_ip", 1, integration_order, local_assemblers_,
+            &LocalAssemblerInterface<DisplacementDim>::getIceVolumeFraction));
+    _integration_point_writer.emplace_back(
+        std::make_unique<MeshLib::IntegrationPointWriter>(
+            "epsilon_m_ip",
+            static_cast<int>(mesh.getDimension() == 2 ? 4 : 6) /*n components*/,
+            integration_order, local_assemblers_,
+            &LocalAssemblerInterface<DisplacementDim>::getEpsilonM));
+
+    _integration_point_writer.emplace_back(
+        std::make_unique<MeshLib::IntegrationPointWriter>(
+            "epsilon_ip",
+            static_cast<int>(mesh.getDimension() == 2 ? 4 : 6) /*n components*/,
+            integration_order, local_assemblers_,
+            &LocalAssemblerInterface<DisplacementDim>::getEpsilon));
+}
+
+template <int DisplacementDim>
+bool ThermoHydroMechanicsProcess<DisplacementDim>::isLinear() const
+{
+    return AssemblyMixin<
+        ThermoHydroMechanicsProcess<DisplacementDim>>::isLinear();
+}
+
+template <int DisplacementDim>
+MathLib::MatrixSpecifications
+ThermoHydroMechanicsProcess<DisplacementDim>::getMatrixSpecifications(
+    const int process_id) const
+{
+    // For the monolithic scheme or the M process (deformation) in the staggered
+    // scheme.
+    if (_use_monolithic_scheme || process_id == 2)
+    {
+        auto const& l = *_local_to_global_index_map;
+        return {l.dofSizeWithoutGhosts(), l.dofSizeWithoutGhosts(),
+                &l.getGhostIndices(), &this->_sparsity_pattern};
+    }
+
+    // For staggered scheme and T or H process (pressure).
+    auto const& l = *_local_to_global_index_map_with_base_nodes;
+    return {l.dofSizeWithoutGhosts(), l.dofSizeWithoutGhosts(),
+            &l.getGhostIndices(), &_sparsity_pattern_with_linear_element};
+}
+
+template <int DisplacementDim>
+void ThermoHydroMechanicsProcess<DisplacementDim>::constructDofTable()
+{
+    // Create single component dof in every of the mesh's nodes.
+    _mesh_subset_all_nodes =
+        std::make_unique<MeshLib::MeshSubset>(_mesh, _mesh.getNodes());
+    // Create single component dof in the mesh's base nodes.
+    _base_nodes = MeshLib::getBaseNodes(_mesh.getElements());
+    _mesh_subset_base_nodes =
+        std::make_unique<MeshLib::MeshSubset>(_mesh, _base_nodes);
+
+    // TODO move the two data members somewhere else.
+    // for extrapolation of secondary variables of stress or strain
+    std::vector<MeshLib::MeshSubset> all_mesh_subsets_single_component{
+        *_mesh_subset_all_nodes};
+    _local_to_global_index_map_single_component =
+        std::make_unique<NumLib::LocalToGlobalIndexMap>(
+            std::move(all_mesh_subsets_single_component),
+            // by location order is needed for output
+            NumLib::ComponentOrder::BY_LOCATION);
+
+    if (_use_monolithic_scheme)
+    {
+        // For temperature, which is the first
+        std::vector<MeshLib::MeshSubset> all_mesh_subsets{
+            *_mesh_subset_base_nodes};
+
+        // For pressure, which is the second
+        all_mesh_subsets.push_back(*_mesh_subset_base_nodes);
+
+        // For displacement.
+        const int monolithic_process_id = 0;
+        std::generate_n(std::back_inserter(all_mesh_subsets),
+                        getProcessVariables(monolithic_process_id)[2]
+                            .get()
+                            .getNumberOfGlobalComponents(),
+                        [&]() { return *_mesh_subset_all_nodes; });
+
+        std::vector<int> const vec_n_components{1, 1, DisplacementDim};
+        _local_to_global_index_map =
+            std::make_unique<NumLib::LocalToGlobalIndexMap>(
+                std::move(all_mesh_subsets), vec_n_components,
+                NumLib::ComponentOrder::BY_LOCATION);
+        assert(_local_to_global_index_map);
+    }
+    else
+    {
+        // For displacement equation.
+        const int process_id = 2;
+        std::vector<MeshLib::MeshSubset> all_mesh_subsets;
+        std::generate_n(std::back_inserter(all_mesh_subsets),
+                        getProcessVariables(process_id)[0]
+                            .get()
+                            .getNumberOfGlobalComponents(),
+                        [&]() { return *_mesh_subset_all_nodes; });
+
+        std::vector<int> const vec_n_components{DisplacementDim};
+        _local_to_global_index_map =
+            std::make_unique<NumLib::LocalToGlobalIndexMap>(
+                std::move(all_mesh_subsets), vec_n_components,
+                NumLib::ComponentOrder::BY_LOCATION);
+
+        // For pressure equation or temperature equation.
+        // Collect the mesh subsets with base nodes in a vector.
+        std::vector<MeshLib::MeshSubset> all_mesh_subsets_base_nodes{
+            *_mesh_subset_base_nodes};
+        _local_to_global_index_map_with_base_nodes =
+            std::make_unique<NumLib::LocalToGlobalIndexMap>(
+                std::move(all_mesh_subsets_base_nodes),
+                // by location order is needed for output
+                NumLib::ComponentOrder::BY_LOCATION);
+
+        _sparsity_pattern_with_linear_element = NumLib::computeSparsityPattern(
+            *_local_to_global_index_map_with_base_nodes, _mesh);
+
+        assert(_local_to_global_index_map);
+        assert(_local_to_global_index_map_with_base_nodes);
+    }
+}
+
+template <int DisplacementDim>
+void ThermoHydroMechanicsProcess<DisplacementDim>::initializeConcreteProcess(
+    NumLib::LocalToGlobalIndexMap const& dof_table,
+    MeshLib::Mesh const& mesh,
+    unsigned const integration_order)
+{
+    ProcessLib::createLocalAssemblersHM<DisplacementDim,
+                                        ThermoHydroMechanicsLocalAssembler>(
+        mesh.getElements(), dof_table, local_assemblers_,
+        NumLib::IntegrationOrder{integration_order}, mesh.isAxiallySymmetric(),
+        _process_data);
+
+    auto add_secondary_variable = [&](std::string const& name,
+                                      int const num_components,
+                                      auto get_ip_values_function)
+    {
+        _secondary_variables.addSecondaryVariable(
+            name,
+            makeExtrapolator(num_components, getExtrapolator(),
+                             local_assemblers_,
+                             std::move(get_ip_values_function)));
+    };
+
+    add_secondary_variable(
+        "sigma",
+        MathLib::KelvinVector::KelvinVectorType<
+            DisplacementDim>::RowsAtCompileTime,
+        &LocalAssemblerInterface<DisplacementDim>::getIntPtSigma);
+
+    add_secondary_variable(
+        "sigma_ice",
+        MathLib::KelvinVector::KelvinVectorType<
+            DisplacementDim>::RowsAtCompileTime,
+        &LocalAssemblerInterface<DisplacementDim>::getIntPtSigmaIce);
+
+    add_secondary_variable(
+        "epsilon_0",
+        MathLib::KelvinVector::KelvinVectorType<
+            DisplacementDim>::RowsAtCompileTime,
+        &LocalAssemblerInterface<DisplacementDim>::getIntPtEpsilon0);
+
+    add_secondary_variable(
+        "epsilon_m",
+        MathLib::KelvinVector::KelvinVectorType<
+            DisplacementDim>::RowsAtCompileTime,
+        &LocalAssemblerInterface<DisplacementDim>::getIntPtEpsilonM);
+
+    add_secondary_variable(
+        "epsilon",
+        MathLib::KelvinVector::KelvinVectorType<
+            DisplacementDim>::RowsAtCompileTime,
+        &LocalAssemblerInterface<DisplacementDim>::getIntPtEpsilon);
+
+    add_secondary_variable(
+        "ice_volume_fraction", 1,
+        &LocalAssemblerInterface<DisplacementDim>::getIntPtIceVolume);
+
+    add_secondary_variable(
+        "velocity", mesh.getDimension(),
+        &LocalAssemblerInterface<DisplacementDim>::getIntPtDarcyVelocity);
+
+    add_secondary_variable(
+        "fluid_density", 1,
+        &LocalAssemblerInterface<DisplacementDim>::getIntPtFluidDensity);
+
+    add_secondary_variable(
+        "viscosity", 1,
+        &LocalAssemblerInterface<DisplacementDim>::getIntPtViscosity);
+
+    _process_data.element_phi_fr = MeshLib::getOrCreateMeshProperty<double>(
+        const_cast<MeshLib::Mesh&>(mesh), "ice_volume_fraction_avg",
+        MeshLib::MeshItemType::Cell, 1);
+
+    _process_data.element_fluid_density =
+        MeshLib::getOrCreateMeshProperty<double>(
+            const_cast<MeshLib::Mesh&>(mesh), "fluid_density_avg",
+            MeshLib::MeshItemType::Cell, 1);
+
+    _process_data.element_viscosity = MeshLib::getOrCreateMeshProperty<double>(
+        const_cast<MeshLib::Mesh&>(mesh), "viscosity_avg",
+        MeshLib::MeshItemType::Cell, 1);
+
+    _process_data.element_stresses = MeshLib::getOrCreateMeshProperty<double>(
+        const_cast<MeshLib::Mesh&>(mesh), "stress_avg",
+        MeshLib::MeshItemType::Cell,
+        MathLib::KelvinVector::KelvinVectorType<
+            DisplacementDim>::RowsAtCompileTime);
+
+    _process_data.element_ice_stresses =
+        MeshLib::getOrCreateMeshProperty<double>(
+            const_cast<MeshLib::Mesh&>(mesh), "sigma_ice_avg",
+            MeshLib::MeshItemType::Cell,
+            MathLib::KelvinVector::KelvinVectorType<
+                DisplacementDim>::RowsAtCompileTime);
+
+    _process_data.cell_sensible_heat = MeshLib::getOrCreateMeshProperty<double>(
+        const_cast<MeshLib::Mesh&>(mesh), "sensible_heat",
+        MeshLib::MeshItemType::Cell, 1);
+
+    _process_data.pressure_interpolated =
+        MeshLib::getOrCreateMeshProperty<double>(
+            const_cast<MeshLib::Mesh&>(mesh), "pressure_interpolated",
+            MeshLib::MeshItemType::Node, 1);
+
+    _process_data.temperature_interpolated =
+        MeshLib::getOrCreateMeshProperty<double>(
+            const_cast<MeshLib::Mesh&>(mesh), "temperature_interpolated",
+            MeshLib::MeshItemType::Node, 1);
+
+    //
+    // enable output of internal variables defined by material models
+    //
+    ProcessLib::Deformation::solidMaterialInternalToSecondaryVariables<
+        LocalAssemblerInterface<DisplacementDim>>(_process_data.solid_materials,
+                                                  add_secondary_variable);
+
+    ProcessLib::Deformation::
+        solidMaterialInternalVariablesToIntegrationPointWriter(
+            _process_data.solid_materials, local_assemblers_,
+            _integration_point_writer, integration_order);
+
+    setIPDataInitialConditions(_integration_point_writer, mesh.getProperties(),
+                               local_assemblers_);
+
+    // Initialize local assemblers after all variables have been set.
+    GlobalExecutor::executeMemberOnDereferenced(
+        &LocalAssemblerInterface<DisplacementDim>::initialize,
+        local_assemblers_, *_local_to_global_index_map);
+}
+
+template <int DisplacementDim>
+void ThermoHydroMechanicsProcess<DisplacementDim>::initializeBoundaryConditions(
+    std::map<int, std::shared_ptr<MaterialPropertyLib::Medium>> const& media)
+{
+    if (_use_monolithic_scheme)
+    {
+        const int process_id_of_thermohydromechancs = 0;
+        initializeProcessBoundaryConditionsAndSourceTerms(
+            *_local_to_global_index_map, process_id_of_thermohydromechancs,
+            media);
+        return;
+    }
+
+    // Staggered scheme:
+    // for the equations of heat transport
+    const int thermal_process_id = 0;
+    initializeProcessBoundaryConditionsAndSourceTerms(
+        *_local_to_global_index_map_with_base_nodes, thermal_process_id, media);
+
+    // for the equations of mass balance
+    const int hydraulic_process_id = 1;
+    initializeProcessBoundaryConditionsAndSourceTerms(
+        *_local_to_global_index_map_with_base_nodes, hydraulic_process_id,
+        media);
+
+    // for the equations of deformation.
+    const int mechanical_process_id = 2;
+    initializeProcessBoundaryConditionsAndSourceTerms(
+        *_local_to_global_index_map, mechanical_process_id, media);
+}
+
+template <int DisplacementDim>
+void ThermoHydroMechanicsProcess<DisplacementDim>::
+    setInitialConditionsConcreteProcess(std::vector<GlobalVector*> const& x,
+                                        double const t,
+                                        int const process_id)
+{
+    DBUG("SetInitialConditions ThermoHydroMechanicsProcess.");
+
+    GlobalExecutor::executeMemberOnDereferenced(
+        &LocalAssemblerInterface<DisplacementDim>::setInitialConditions,
+        local_assemblers_, getDOFTables(x.size()), x, t, process_id);
+}
+
+template <int DisplacementDim>
+void ThermoHydroMechanicsProcess<DisplacementDim>::assembleConcreteProcess(
+    const double t, double const dt, std::vector<GlobalVector*> const& x,
+    std::vector<GlobalVector*> const& x_prev, int const process_id,
+    GlobalMatrix& M, GlobalMatrix& K, GlobalVector& b)
+{
+    DBUG("Assemble the equations for ThermoHydroMechanics");
+
+    AssemblyMixin<ThermoHydroMechanicsProcess<DisplacementDim>>::assemble(
+        t, dt, x, x_prev, process_id, M, K, b);
+}
+
+template <int DisplacementDim>
+void ThermoHydroMechanicsProcess<DisplacementDim>::
+    assembleWithJacobianConcreteProcess(
+        const double t, double const dt, std::vector<GlobalVector*> const& x,
+        std::vector<GlobalVector*> const& x_prev, int const process_id,
+        GlobalVector& b, GlobalMatrix& Jac)
+{
+    // For the monolithic scheme
+    if (_use_monolithic_scheme)
+    {
+        DBUG(
+            "Assemble the Jacobian of ThermoHydroMechanics for the monolithic "
+            "scheme.");
+    }
+    else
+    {
+        // For the staggered scheme
+        if (process_id == 0)
+        {
+            DBUG(
+                "Assemble the Jacobian equations of heat transport process in "
+                "ThermoHydroMechanics for the staggered scheme.");
+        }
+        else if (process_id == 1)
+        {
+            DBUG(
+                "Assemble the Jacobian equations of liquid fluid process in "
+                "ThermoHydroMechanics for the staggered scheme.");
+        }
+        else
+        {
+            DBUG(
+                "Assemble the Jacobian equations of mechanical process in "
+                "ThermoHydroMechanics for the staggered scheme.");
+        }
+    }
+
+    AssemblyMixin<ThermoHydroMechanicsProcess<DisplacementDim>>::
+        assembleWithJacobian(t, dt, x, x_prev, process_id, b, Jac);
+}
+
+template <int DisplacementDim>
+void ThermoHydroMechanicsProcess<DisplacementDim>::preTimestepConcreteProcess(
+    std::vector<GlobalVector*> const& x, double const t, double const dt,
+    const int process_id)
+{
+    DBUG("PreTimestep ThermoHydroMechanicsProcess.");
+
+    if (hasMechanicalProcess(process_id))
+    {
+        GlobalExecutor::executeMemberOnDereferenced(
+            &LocalAssemblerInterface<DisplacementDim>::preTimestep,
+            local_assemblers_, *_local_to_global_index_map, *x[process_id], t,
+            dt);
+
+        AssemblyMixin<ThermoHydroMechanicsProcess<DisplacementDim>>::
+            updateActiveElements();
+    }
+}
+
+template <int DisplacementDim>
+void ThermoHydroMechanicsProcess<DisplacementDim>::postTimestepConcreteProcess(
+    std::vector<GlobalVector*> const& x,
+    std::vector<GlobalVector*> const& x_prev, double const t, double const dt,
+    const int process_id)
+{
+    if (process_id != 0)
+    {
+        return;
+    }
+
+    DBUG("PostTimestep ThermoHydroMechanicsProcess.");
+
+    GlobalExecutor::executeSelectedMemberOnDereferenced(
+        &LocalAssemblerInterface<DisplacementDim>::postTimestep,
+        local_assemblers_, getActiveElementIDs(), getDOFTables(x.size()), x,
+        x_prev, t, dt, process_id);
+}
+
+template <int DisplacementDim>
+std::vector<std::vector<std::string>>
+ThermoHydroMechanicsProcess<DisplacementDim>::initializeAssemblyOnSubmeshes(
+    std::vector<std::reference_wrapper<MeshLib::Mesh>> const& meshes)
+{
+    INFO("ThermoHydroMechanicsProcess process initializeSubmeshOutput().");
+    std::vector<std::vector<std::string>> per_process_residuum_names;
+
+    std::string const flow_rate_name =
+        _process_data.is_volume_balance_equation_type ? "VolumetricFlowRate"
+                                                      : "MassFlowRate";
+
+    if (_process_variables.size() == 1)  // monolithic
+    {
+        per_process_residuum_names = {
+            {"HeatFlowRate", flow_rate_name, "NodalForces"}};
+    }
+    else  // staggered
+    {
+        per_process_residuum_names = {
+            {"HeatFlowRate"}, {flow_rate_name}, {"NodalForces"}};
+    }
+
+    AssemblyMixin<ThermoHydroMechanicsProcess<DisplacementDim>>::
+        initializeAssemblyOnSubmeshes(meshes, per_process_residuum_names);
+
+    return per_process_residuum_names;
+}
+
+template <int DisplacementDim>
+void ThermoHydroMechanicsProcess<DisplacementDim>::
+    computeSecondaryVariableConcrete(double const t, double const dt,
+                                     std::vector<GlobalVector*> const& x,
+                                     GlobalVector const& x_prev,
+                                     const int process_id)
+{
+    if (process_id != 0)
+    {
+        return;
+    }
+
+    DBUG("Compute the secondary variables for ThermoHydroMechanicsProcess.");
+
+    GlobalExecutor::executeSelectedMemberOnDereferenced(
+        &LocalAssemblerInterface<DisplacementDim>::computeSecondaryVariable,
+        local_assemblers_, getActiveElementIDs(), getDOFTables(x.size()), t, dt,
+        x, x_prev, process_id);
+}
+
+template <int DisplacementDim>
+std::tuple<NumLib::LocalToGlobalIndexMap*, bool> ThermoHydroMechanicsProcess<
+    DisplacementDim>::getDOFTableForExtrapolatorData() const
+{
+    const bool manage_storage = false;
+    return std::make_tuple(_local_to_global_index_map_single_component.get(),
+                           manage_storage);
+}
+
+template <int DisplacementDim>
+NumLib::LocalToGlobalIndexMap const&
+ThermoHydroMechanicsProcess<DisplacementDim>::getDOFTable(
+    const int process_id) const
+{
+    if (hasMechanicalProcess(process_id))
+    {
+        return *_local_to_global_index_map;
+    }
+
+    // For the equation of pressure
+    return *_local_to_global_index_map_with_base_nodes;
+}
+
+template class ThermoHydroMechanicsProcess<2>;
+template class ThermoHydroMechanicsProcess<3>;
+
+}  // namespace ThermoHydroMechanics
+}  // namespace ProcessLib

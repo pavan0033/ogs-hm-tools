@@ -1,0 +1,241 @@
+# C++ standard setup
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Set compiler helper variables
+if((CMAKE_CXX_COMPILER_ID MATCHES "Clang") OR (CMAKE_CXX_COMPILER_ID MATCHES
+                                               "IntelLLVM")
+)
+    set(COMPILER_IS_CLANG TRUE)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(COMPILER_IS_GCC TRUE)
+endif()
+
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+    set(APPLE_ARM TRUE)
+endif()
+
+# GNU-like compiler
+if(COMPILER_IS_GCC OR COMPILER_IS_CLANG OR CMAKE_CXX_COMPILER_ID STREQUAL
+                                           "Intel"
+)
+
+    # Exclude Eigen, system headers, and CPM dependencies from code coverage.
+    function(_ogs_add_coverage_exclusions)
+        if(NOT OGS_COVERAGE)
+            return()
+        endif()
+
+        set(coverage_excludes
+            $<$<COMPILE_LANGUAGE:CXX>:-fprofile-exclude-files=/usr/include/.*>
+            $<$<COMPILE_LANGUAGE:CXX>:-fprofile-exclude-files=.*/_deps/.*>
+        )
+        if(CPM_SOURCE_CACHE)
+            string(REPLACE "/" "\\/" cpm_cache_regex "${CPM_SOURCE_CACHE}")
+            list(
+                APPEND
+                coverage_excludes
+                $<$<COMPILE_LANGUAGE:CXX>:-fprofile-exclude-files=${cpm_cache_regex}/.*>
+            )
+        endif()
+        add_compile_options(${coverage_excludes})
+    endfunction()
+
+    _ogs_add_coverage_exclusions()
+
+    # Profiling
+    if(OGS_PROFILE)
+        if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+            message(
+                STATUS "When using profiling you should set CMAKE_BUILD_TYPE \
+                to Release."
+            )
+        endif()
+        set(PROFILE_FLAGS -fno-omit-frame-pointer -O2 -DNDEBUG)
+        # clang compiler does not know the following flags
+        if(NOT COMPILER_IS_CLANG)
+            list(APPEND PROFILE_FLAGS -fno-inline-functions-called-once
+                 -fno-optimize-sibling-calls
+            )
+        endif()
+        add_compile_options(${PROFILE_FLAGS})
+        add_link_options(-pg)
+    endif()
+
+    if(OGS_CPU_ARCHITECTURE STREQUAL "generic")
+        set(CPU_FLAGS -mtune=generic)
+    elseif(NOT APPLE_ARM AND OGS_CPU_ARCHITECTURE)
+        set(CPU_FLAGS -march=${OGS_CPU_ARCHITECTURE})
+    endif()
+
+    if(COMPILER_IS_GCC)
+        if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS ${ogs.minimum_version.gcc})
+            message(FATAL_ERROR "Aborting: GCC ${ogs.minimum_version.gcc} is \
+                    required! Found version ${CMAKE_CXX_COMPILER_VERSION}."
+            )
+        endif()
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fext-numeric-literals>)
+        # GCC versions reporting false positives from inlined Eigen code despite
+        # Eigen being a SYSTEM include. Listed explicitly so that fixed future
+        # versions report these warnings again. See
+        # https://gitlab.opengeosys.org/ogs/ogs/-/merge_requests/5037
+        set(_gcc_versions_with_eigen_false_positives 13.3.0 14.1.1 14.2.1
+                                                     15.2.1 16.1.1 16.2.1
+        )
+        if(CMAKE_CXX_COMPILER_VERSION IN_LIST
+           _gcc_versions_with_eigen_false_positives
+        )
+            add_compile_options(
+                $<$<COMPILE_LANGUAGE:CXX>:-Wno-array-bounds>
+                $<$<COMPILE_LANGUAGE:CXX>:-Wno-stringop-overflow>
+            )
+            if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15)
+                add_compile_options(
+                    $<$<COMPILE_LANGUAGE:CXX>:-Wno-stringop-overread>
+                )
+            endif()
+            if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15)
+                add_compile_options(
+                    $<$<COMPILE_LANGUAGE:CXX>:-Wno-maybe-uninitialized>
+                )
+            endif()
+        endif()
+        unset(_gcc_versions_with_eigen_false_positives)
+    endif()
+
+    if(COMPILER_IS_CLANG)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+            if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS
+               ${ogs.minimum_version.apple_clang}
+            )
+                message(
+                    FATAL_ERROR
+                        "Aborting: Apple Clang ${ogs.minimum_version.apple_clang} \
+                    is required! Found version ${CMAKE_CXX_COMPILER_VERSION}. Update Xcode!"
+                )
+            endif()
+        else()
+            if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS
+               ${ogs.minimum_version.clang}
+            )
+                message(
+                    FATAL_ERROR "Aborting: Clang ${ogs.minimum_version.clang} \
+                    is required! Found version ${CMAKE_CXX_COMPILER_VERSION}"
+                )
+            endif()
+        endif()
+    endif()
+
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+        # Use highest instruction set available on the compilation host
+        # processor
+        add_compile_options(-xHOST)
+    endif()
+
+    # Linker detection: prefer mold > lld > gold > regular OR set manually
+    set(OGS_LINKER "" CACHE STRING "Preferred linker (mold|lld|gold|default)")
+    set_property(CACHE OGS_LINKER PROPERTY STRINGS mold lld gold default)
+
+    if(NOT OGS_LINKER)
+        foreach(linker mold lld gold)
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=${linker} -Wl,--version
+                RESULT_VARIABLE _res
+                OUTPUT_VARIABLE _linker_version
+                ERROR_QUIET
+            )
+
+            if(_res EQUAL 0)
+                if(linker STREQUAL "lld" AND _linker_version MATCHES "LLD")
+                    set(OGS_LINKER lld CACHE STRING "" FORCE)
+                    break()
+                elseif(linker STREQUAL "gold" AND _linker_version MATCHES
+                                                  "GNU gold"
+                       AND NOT OGS_BUILD_WHEEL
+                )
+                    set(OGS_LINKER gold CACHE STRING "" FORCE)
+                    break()
+                elseif(linker STREQUAL "mold" AND _linker_version MATCHES
+                                                  "mold"
+                )
+                    set(OGS_LINKER mold CACHE STRING "" FORCE)
+                    break()
+                endif()
+            endif()
+        endforeach()
+
+        if(NOT OGS_LINKER)
+            set(OGS_LINKER default CACHE STRING "" FORCE)
+        endif()
+    endif()
+
+    if(OGS_LINKER AND NOT OGS_LINKER STREQUAL "default")
+        add_link_options(-fuse-ld=${OGS_LINKER})
+        message(STATUS "Using ${OGS_LINKER} linker")
+    else()
+        message(STATUS "Using default system linker")
+    endif()
+endif()
+
+if(MSVC)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS
+       ${ogs.minimum_version.msvc.compiler}
+    )
+        message(
+            FATAL_ERROR
+                "Aborting: Visual Studio compiler \
+            ${ogs.minimum_version.msvc.compiler} is required. Found version \
+            ${CMAKE_CXX_COMPILER_VERSION}."
+        )
+    endif()
+    if(MSVC_TOOLSET_VERSION LESS ${ogs.minimum_version.msvc.toolset})
+        message(
+            FATAL_ERROR
+                "Aborting: Visual Studio ${ogs.minimum_version.msvc.year} \
+            is required! Found Visual Studio with toolset version \
+            ${MSVC_TOOLSET_VERSION}. See the following link for version info: \
+            https://cmake.org/cmake/help/v3.16/variable/MSVC_TOOLSET_VERSION.html"
+        )
+    endif()
+    if(OGS_CPU_ARCHITECTURE STREQUAL "native")
+        set(CPU_FLAGS /favor:blend)
+    else()
+        set(CPU_FLAGS /favor:${OGS_CPU_ARCHITECTURE})
+    endif()
+    add_compile_options(
+        /wd4290
+        /wd4267
+        /wd4996
+        /bigobj
+        # Disables all warnings coming from include with <>-syntax
+        # https://devblogs.microsoft.com/cppblog/broken-warnings-theory/
+        /experimental:external
+        /external:anglebrackets
+        /external:W0
+    )
+    add_compile_definitions(
+        _CRT_SECURE_NO_WARNINGS
+        _CRT_NONSTDC_NO_WARNINGS
+        _CRT_XNONSTDC_NO_WARNINGS
+        __restrict__=__restrict # this fixes #5
+        # This fixes compile errors with std::numeric_limits<T>::min() / max()
+        NOMINMAX
+        BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE # when VC is newer than Boost
+    )
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /ignore:4099")
+
+    # Use Multi-ToolTask scheduler
+    if(NOT CMAKE_VS_GLOBALS MATCHES "(^|;)UseMultiToolTask=")
+        list(APPEND CMAKE_VS_GLOBALS UseMultiToolTask=true)
+    endif()
+    if(NOT CMAKE_VS_GLOBALS MATCHES "(^|;)EnforceProcessCountAcrossBuilds=")
+        list(APPEND CMAKE_VS_GLOBALS EnforceProcessCountAcrossBuilds=true)
+    endif()
+endif()
+
+if(PROJECT_IS_TOP_LEVEL)
+    include(Sanitizers)
+endif()
+
+add_compile_options(${CPU_FLAGS})

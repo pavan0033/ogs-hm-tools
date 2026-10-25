@@ -1,0 +1,163 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+namespace MaterialLib
+{
+/**
+ * Namespace containing physical constants
+ * All members of this namespace should be given in SI standard units,
+ * i.e., in terms of kg, m, s, K, mol, A, cd.
+ */
+namespace PhysicalConstant
+{
+/// Zero degrees Celsius in Kelvin
+constexpr double CelsiusZeroInKelvin = 273.15;
+
+/**
+  Ideal gas constant in SI standard units (J \per{mol} \per{K})
+
+  - Source:
+  https://web.archive.org/web/20210603224431/https://physics.nist.gov/cgi-bin/cuu/Value?r
+  - Date visited:         2015-04-17
+  - Standard uncertainty: 0.000 0075 J mol^-1 K^-1
+*/
+constexpr double IdealGasConstant = 8.3144621;
+
+/**
+ * Boltzmann constant in SI standard units (J \per{K})
+ */
+constexpr double BoltzmannConstant = 1.3806505e-23;  ///< J/K
+
+/**
+ * Planck constant in SI standard units (J s)
+ */
+constexpr double PlanckConstant = 6.626068e-34;  ///< J s
+
+/**
+ * Critical point data of water.
+ *
+ * - Source: IAPWS R2-83(1992), "Release on the Values of Temperature, Pressure
+ *   and Density of Ordinary and Heavy Water Substances at their Respective
+ *   Critical Points".
+ *   https://iapws.org/technical-guidance/release/crits
+ */
+namespace CriticalPoint
+{
+/// Critical temperature of ordinary water substance H<sub>2</sub>O.
+/// Stated experimental uncertainty 0.1 K. The IAPWS-95 formulation adopts the
+/// same value as the fixed reducing parameter of \f$\tau = T_c/T\f$, i.e. it is
+/// not a quantity fitted by that formulation, see W. Wagner and A. Pruss, "The
+/// IAPWS Formulation 1995 for the Thermodynamic Properties of Ordinary Water
+/// Substance for General and Scientific Use", J. Phys. Chem. Ref. Data 31, 387
+/// (2002), https://doi.org/10.1063/1.1461829.
+constexpr double TemperatureWater = 647.096;  ///< K
+
+/// Critical pressure of ordinary water substance H<sub>2</sub>O.
+/// Stated experimental uncertainty 0.005 MPa. As for the critical
+/// temperature, IAPWS-IF97 adopts this value as the upper bound of its
+/// region 4 saturation line rather than reproducing it as a fitted quantity,
+/// see IAPWS R7-97(2012), "Revised Release on the IAPWS Industrial
+/// Formulation 1997 for the Thermodynamic Properties of Water and Steam",
+/// Sec. 8.1. http://www.iapws.org/relguide/IF97-Rev.pdf
+constexpr double PressureWater = 22.064e6;  ///< Pa
+}  // namespace CriticalPoint
+
+/**
+ * Atomic masses of certain elements and molar masses of chemical compounds
+ */
+namespace MolarMass
+{
+/**
+ * Water.
+ *
+ * - Source:       http://www.ciaaw.org/pubs/TSAW2013_xls.xls
+ * - Date visited: 2015-05-28
+ *
+ * According to the IUPAC report the atomic mass of O is in the range [15.999
+ * 03, 15.999 77] g/mol and the atomic mass of H is in the range [1.007
+ * 84, 1.008 11] g/mol
+ */
+constexpr double Water = 0.018016;  ///< kg \per{mol}
+
+/**
+ * Nitrogen N<sub>2</sub>.
+ *
+ * - Source:       http://www.ciaaw.org/pubs/TSAW2013_xls.xls
+ * - Date visited: 2015-05-28
+ *
+ * According to the IUPAC report the atomic mass of N is in the range [14.006
+ * 43, 14.007 28] g/mol
+ */
+constexpr double N2 = 0.028013;  ///< kg \per{mol}
+
+/**
+ * Oxygen O<sub>2</sub>.
+ *
+ * - Source:       http://www.ciaaw.org/pubs/TSAW2013_xls.xls
+ * - Date visited: 2015-05-28
+ *
+ * According to the IUPAC report the atomic mass of O is in the range [15.999
+ * 03, 15.999 77] g/mol
+ */
+constexpr double O2 = 0.032;  ///< kg \per{mol}
+
+/**
+ * Air.
+ *
+ * - Source: http://www.engineeringtoolbox.com/molecular-mass-air-d_679.html
+ */
+constexpr double Air = 0.02897;  ///< kg \per{mol}
+
+/**
+ * Hydrogen.
+ *
+ * - Source: https://pubchem.ncbi.nlm.nih.gov/compound/Hydrogen
+ */
+constexpr double H2 = 0.002016;  ///< kg \per{mol}
+}  // namespace MolarMass
+
+/**
+ * Specific gas constant \f$ R_\mathrm{s} = R/M \f$.
+ * \$M\$ is the molar mass.
+ * The unit of \f$ R_\mathrm{s} \f$ is J \per{kg} \per{K}.
+ */
+namespace SpecificGasConstant
+{
+/// Specific gas constant for water vapour.
+constexpr double WaterVapour =
+    IdealGasConstant / MolarMass::Water;  // = 461.504;
+
+/**
+ * Specific gas constant of ordinary water as *defined* for IAPWS-IF97.
+ *
+ * This is not a measured physical constant and must not be replaced by
+ * \c WaterVapour or updated to newer CODATA values: the regression
+ * coefficients of IF97 were fitted with this value held fixed, so it is a
+ * defined parameter of the formulation in the same sense as its reducing
+ * quantities \f$p^*\f$ and \f$T^*\f$. Using any other value makes the IF97
+ * equations disagree with their own published verification tables.
+ *
+ * - Source: IAPWS R7-97(2012), "Revised Release on the IAPWS Industrial
+ *   Formulation 1997 for the Thermodynamic Properties of Water and Steam",
+ *   Sec. 3 "Reference Constants", Eq. (1).
+ *   http://www.iapws.org/relguide/IF97-Rev.pdf
+ */
+constexpr double WaterIF97 = 461.526;  ///< J \per{kg} \per{K}
+}  // namespace SpecificGasConstant
+/**
+ * Henry's law constant
+ * It is defined here as the ratio of the aqueous-phase concentration of a
+ * chemical to its equilibrium partial pressure in the gas phase.
+ */
+namespace HenryConstant
+{
+/**Henry constant for hydrogen, Please refer to
+ * De Nevers N. Physical and chemical equilibrium for chemical engineers[M].
+ * John Wiley & Sons, 2012.
+ */
+constexpr double HenryConstantH2 = 7.65e-6;  /// mol/Pa./m3
+}  // namespace HenryConstant
+}  // namespace PhysicalConstant
+}  // namespace MaterialLib

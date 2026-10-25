@@ -1,0 +1,67 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <vector>
+
+#include "ConvergenceCriterionPerComponent.h"
+#include "DampingPolicy.h"
+#include "MathLib/LinAlg/LinAlgEnums.h"
+
+namespace NumLib
+{
+class LocalToGlobalIndexMap;
+
+//! Convergence criterion applying absolute or relative tolerances individually
+//! to each component of the whole residual vector.
+//!
+//! A check of the solution increment is not done.
+//! If both an absolute and a relative tolerances are specified, at least one of
+//! them has to be satisfied.
+class ConvergenceCriterionPerComponentResidual
+    : public ConvergenceCriterionPerComponent,
+      public DampingPolicy
+{
+public:
+    ConvergenceCriterionPerComponentResidual(
+        std::vector<double>&& absolute_tolerances,
+        std::vector<double>&& relative_tolerances,
+        std::vector<double>&& damping_alpha,
+        bool damping_alpha_switch,
+        const MathLib::VecNormType norm_type);
+
+    bool hasDeltaXCheck() const override { return true; }
+    bool hasResidualCheck() const override { return true; }
+    DampingPolicy const* dampingPolicy() const override
+    {
+        return _damping_alpha_switch ? this : nullptr;
+    }
+
+    /// The function will only do diagnostic output and no actual check of the
+    /// solution increment is made
+    void checkDeltaX(const GlobalVector& minus_delta_x,
+                     GlobalVector const& x) override;
+    void checkResidual(const GlobalVector& residual) override;
+    double apply(GlobalVector const& minus_delta_x,
+                 GlobalVector const& x,
+                 double const base_damping) const override;
+
+    void setDOFTable(const LocalToGlobalIndexMap& dof_table,
+                     MeshLib::Mesh const& mesh) override;
+
+private:
+    const std::vector<double> _abstols;
+    const std::vector<double> _reltols;
+    LocalToGlobalIndexMap const* _dof_table = nullptr;
+    MeshLib::Mesh const* _mesh = nullptr;
+    std::vector<double> _residual_norms_0;
+    const std::vector<double> _damping_alpha;
+    bool _damping_alpha_switch;
+};
+
+std::unique_ptr<ConvergenceCriterionPerComponentResidual>
+createConvergenceCriterionPerComponentResidual(
+    BaseLib::ConfigTree const& config);
+
+}  // namespace NumLib

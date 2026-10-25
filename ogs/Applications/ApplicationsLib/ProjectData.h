@@ -1,0 +1,149 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+
+#include "BaseLib/ConfigTree-fwd.h"
+#include "ChemistryLib/ChemicalSolverInterface.h"
+#include "MaterialLib/MPL/Medium.h"
+#include "MathLib/InterpolationAlgorithms/PiecewiseLinearInterpolation.h"
+#include "ParameterLib/CoordinateSystem.h"
+#include "ParameterLib/Parameter.h"
+#include "ProcessLib/Process.h"
+#include "ProcessLib/ProcessVariable.h"
+
+namespace GeoLib
+{
+struct NamedRaster;
+}
+
+namespace MeshLib
+{
+class Mesh;
+}
+
+namespace NumLib
+{
+class NonlinearSolverBase;
+}
+
+namespace ProcessLib
+{
+class TimeLoop;
+}
+
+/**
+ * The ProjectData Object contains all the data needed for a certain project,
+ * i.e. all geometric data (stored in a GEOObjects-object), all the meshes,
+ * processes, and process variables.
+ */
+class ProjectData final
+{
+public:
+    /// The empty constructor used in the gui, for example, when the project's
+    /// configuration is not loaded yet.
+    ProjectData();
+
+    /// Constructs project data by parsing provided configuration.
+    ///
+    /// \param project_config   Configuration as read from the prj file.
+    /// \param output_directory Where to write simulation output files to.
+    /// \param mesh_directory   Directory where meshes are read from.
+    /// \param script_directory Directory where scripts (e.g. Python BCs) are
+    ///                         read from.
+    ProjectData(BaseLib::ConfigTree const& project_config,
+                std::string const& output_directory,
+                std::string const& mesh_directory,
+                [[maybe_unused]] std::string const& script_directory);
+
+    ProjectData(ProjectData&) = delete;
+
+    //
+    // Process interface
+    //
+
+    /// Provides read access to the process container.
+    std::vector<std::unique_ptr<ProcessLib::Process>> const& getProcesses()
+        const
+    {
+        return _processes;
+    }
+
+    ProcessLib::TimeLoop& getTimeLoop() { return *_time_loop; }
+
+    MeshLib::Mesh& getMesh(std::string const& mesh_name) const;
+    std::vector<std::string> getMeshNames() const;
+
+    std::map<int, std::shared_ptr<MaterialPropertyLib::Medium>> const&
+    getMedia() const
+    {
+        return _media;
+    }
+
+private:
+    /// Parses the process variables configuration and creates new variables for
+    /// each variable entry passing the corresponding subtree to the process
+    /// variable constructor.
+    void parseProcessVariables(
+        BaseLib::ConfigTree const& process_variables_config);
+
+    /// Parses the parameters configuration and saves them.
+    /// Checks for double parameters' names. Returns names of vectors which are
+    /// to be transformed using local coordinate system.
+    std::vector<std::string> parseParameters(
+        BaseLib::ConfigTree const& parameters_config);
+
+    /// Parses media configuration and saves them in an object.
+    void parseMedia(std::optional<BaseLib::ConfigTree> const& media_config);
+
+    /// Parses the processes configuration and creates new processes for each
+    /// process entry passing the corresponding subtree to the process
+    /// constructor.
+    void parseProcesses(BaseLib::ConfigTree const& processes_config,
+                        std::string const& output_directory,
+                        std::unique_ptr<ChemistryLib::ChemicalSolverInterface>&&
+                            chemical_solver_interface);
+
+    /// Parses the time loop configuration.
+    void parseTimeLoop(BaseLib::ConfigTree const& config,
+                       const std::string& output_directory);
+
+    void parseLinearSolvers(BaseLib::ConfigTree const& config);
+
+    void parseNonlinearSolvers(BaseLib::ConfigTree const& config);
+
+    void parseCurves(std::optional<BaseLib::ConfigTree> const& config);
+
+    std::unique_ptr<ChemistryLib::ChemicalSolverInterface>
+    parseChemicalSolverInterface(
+        std::optional<BaseLib::ConfigTree> const& config,
+        const std::string& output_directory);
+
+    std::vector<std::unique_ptr<MeshLib::Mesh>> _mesh_vec;
+    std::vector<GeoLib::NamedRaster> _named_rasters;
+    std::vector<std::unique_ptr<ProcessLib::Process>> _processes;
+    std::vector<ProcessLib::ProcessVariable> _process_variables;
+
+    /// Buffer for each parameter config passed to the process.
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> _parameters;
+
+    std::optional<ParameterLib::CoordinateSystem> _local_coordinate_system;
+
+    std::map<int, std::shared_ptr<MaterialPropertyLib::Medium>> _media;
+
+    /// The time loop used to solve this project's processes.
+    std::unique_ptr<ProcessLib::TimeLoop> _time_loop;
+
+    std::map<std::string, std::unique_ptr<GlobalLinearSolver>> _linear_solvers;
+
+    std::map<std::string, std::unique_ptr<NumLib::NonlinearSolverBase>>
+        _nonlinear_solvers;
+    std::map<std::string,
+             std::unique_ptr<MathLib::PiecewiseLinearInterpolation>>
+        _curves;
+};

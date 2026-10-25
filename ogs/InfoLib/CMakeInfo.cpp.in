@@ -1,0 +1,13 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "InfoLib/CMakeInfo.h"
+
+namespace CMakeInfoLib
+{
+
+namespace CMakeInfo
+{
+const std::string cmake_args("@CMAKE_ARGS_ESCAPED@");
+}  // namespace CMakeInfo
+}  // namespace CMakeInfoLib

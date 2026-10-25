@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+# SPDX-License-Identifier: BSD-3-Clause
+
+import os
+import platform
+import sys
+from pathlib import Path
+
+import ogs
+import pytest
+
+# Make scripts/doc importable for unit tests (e.g. test_feature_matrix.py)
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts/doc"))
+
+
+def pytest_runtest_setup(item):
+    perf_test_markers = list(item.iter_markers("performance_test"))
+    skip_perf_tests = os.getenv(
+        "OGS_PERFORMANCE_TESTS_ALLOWED_TO_FAIL", "False"
+    ).lower() in (
+        "true",
+        "1",
+        "t",
+    )
+
+    if perf_test_markers and skip_perf_tests:
+        item.add_marker(
+            pytest.mark.xfail(
+                reason="the environment variable OGS_PERFORMANCE_TESTS_ALLOWED_TO_FAIL says that performance tests might fail",
+                run=True,
+                strict=False,
+            )
+        )
+
+    if platform.system() == "Windows" and ogs.OGS_USE_MKL == "ON":
+        os.add_dll_directory(
+            Path("C:/Program Files (x86)/Intel/oneAPI/compiler/latest/bin")
+        )
+        os.add_dll_directory(Path("C:/Program Files (x86)/Intel/oneAPI/mkl/latest/bin"))
+
+
+@pytest.fixture(scope="session")
+def ogs_src_dir():
+    return Path(__file__).parent.parent.parent

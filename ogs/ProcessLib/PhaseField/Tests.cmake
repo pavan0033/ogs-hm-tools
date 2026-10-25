@@ -1,0 +1,26 @@
+if(OGS_USE_MPI)
+    OgsTest(PROJECTFILE PhaseField/beam/AT1_iso_tensile.prj WRAPPER mpirun -np 1 RUNTIME 18)
+    OgsTest(PROJECTFILE PhaseField/beam/AT2_iso_tensile.prj WRAPPER mpirun -np 1 RUNTIME 260)
+    OgsTest(PROJECTFILE PhaseField/beam/AT1_vd_tensile.prj WRAPPER mpirun -np 1 RUNTIME 18)
+    OgsTest(PROJECTFILE PhaseField/beam/AT1_sp_tensile.prj WRAPPER mpirun -np 1 RUNTIME 260)
+    OgsTest(PROJECTFILE PhaseField/beam/AT1_vd_tensile_2core.prj WRAPPER mpirun -np 2 RUNTIME 140)
+    OgsTest(PROJECTFILE PhaseField/beam/bar_COHESIVE_linear.prj
+        RUNTIME 300
+        WRAPPER mpirun -np 1
+    )
+    OgsTest(PROJECTFILE PhaseField/beam/bar_COHESIVE_exponential.prj WRAPPER mpirun -np 1 RUNTIME 300)
+    OgsTest(PROJECTFILE PhaseField/surfing/surfing.prj WRAPPER mpirun -np 1 RUNTIME 18)
+    OgsTest(PROJECTFILE PhaseField/surfing/surfing_restart.xml WRAPPER mpirun -np 1 RUNTIME 18)
+    OgsTest(PROJECTFILE PhaseField/k_regime_HF/2D_bm_0p01.prj WRAPPER mpirun -np 2 RUNTIME 18)
+    OgsTest(PROJECTFILE PhaseField/beam/voldev-ortho/AT2_vd_tensile_VZ.prj WRAPPER mpirun -np 1 RUNTIME 120)
+    OgsTest(PROJECTFILE PhaseField/single_edge_notched/masonry-ortho/shear.prj WRAPPER mpirun -np 1 RUNTIME 600)
+endif()
+
+if(OGS_USE_PETSC)
+    NotebookTest(NOTEBOOKFILE PhaseField/surfing_jupyter_notebook/surfing_pyvista.py RUNTIME 25)
+    NotebookTest(NOTEBOOKFILE PhaseField/beam_jupyter_notebook/beam.py RUNTIME 1200 PROPERTIES PROCESSORS 3)
+    NotebookTest(NOTEBOOKFILE PhaseField/tpb_jupyter_notebook/TPB.py RUNTIME 110 PROPERTIES PROCESSORS 4)
+    NotebookTest(NOTEBOOKFILE PhaseField/kregime_jupyter_notebook/Kregime_Static_jupyter.py RUNTIME 40)
+    NotebookTest(NOTEBOOKFILE PhaseField/PForthotropy_jupyter_notebook/sen_shear.py RUNTIME 500 PROPERTIES PROCESSORS 4)
+    NotebookTest(NOTEBOOKFILE PhaseField/Kregime_Propagating_jupyter_notebook/Kregime_Propagating_jupyter.py RUNTIME 550)
+endif()

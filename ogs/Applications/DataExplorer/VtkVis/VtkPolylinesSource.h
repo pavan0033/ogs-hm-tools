@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+// ** INCLUDES **
+#include "VtkAlgorithmProperties.h"
+#include <vtkPolyDataAlgorithm.h>
+
+// forward declaration
+namespace GeoLib {
+class Polyline;
+}
+
+
+/**
+ * \brief VtkPolylinesSource is a VTK source object for the visualisation of
+ * polyline data. As a vtkPolyDataAlgorithm it outputs polygonal data.
+ */
+class VtkPolylinesSource : public vtkPolyDataAlgorithm, public VtkAlgorithmProperties
+{
+public:
+    /// Create new objects with New() because of VTKs object reference counting.
+    static VtkPolylinesSource* New();
+
+    vtkTypeMacro(VtkPolylinesSource,vtkPolyDataAlgorithm);
+
+    /// Sets the polyline vector.
+    void setPolylines(const std::vector<GeoLib::Polyline*>* polylines) { _polylines = polylines; }
+
+    /// Prints its data on a stream.
+    void PrintSelf(ostream& os, vtkIndent indent) override;
+
+    void SetUserProperty(QString name, QVariant value) override;
+
+protected:
+    VtkPolylinesSource();
+    ~VtkPolylinesSource() override;
+
+    /// Computes the polygonal data object.
+    int RequestData(vtkInformation* request,
+                    vtkInformationVector** inputVector,
+                    vtkInformationVector* outputVector) override;
+
+    int RequestInformation(vtkInformation* request,
+                           vtkInformationVector** inputVector,
+                           vtkInformationVector* outputVector) override;
+
+    /// The polylines to visualize.
+    const std::vector<GeoLib::Polyline*>* _polylines{nullptr};
+
+private:
+};

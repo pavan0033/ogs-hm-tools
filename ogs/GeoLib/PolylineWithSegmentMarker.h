@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "Polyline.h"
+
+namespace GeoLib
+{
+
+/**
+ * This is a polyline with the possibility to mark some segments. Thus class
+ * PolylineWithSegmentMarker is derived from class Polyline.
+ */
+class PolylineWithSegmentMarker final : public GeoLib::Polyline
+{
+public:
+    explicit PolylineWithSegmentMarker(GeoLib::Polyline const& polyline);
+
+    /**
+     * Method marks the segment (default mark is true).
+     * @param seg_num the segment number that should be marked
+     * @param mark_val the value of the flag (true or false)
+     */
+    void markSegment(std::size_t seg_num, bool mark_val = true);
+    /**
+     * Method returns the value of the mark for the given segment.
+     * @param seg_num segment number
+     * @return either true if the segment is marked or false else
+     */
+    bool isSegmentMarked(std::size_t seg_num) const;
+
+    /**
+     * Method calls @see Polyline::addPoint() and initializes the mark of the
+     * corresponding line segment.
+     * @see Polyline::addPoint()
+     */
+    bool addPoint(std::size_t pnt_id) override;
+
+    /**
+     * Method calls the @see Polyline::insertPoint() and initializes the
+     * inserted line segment with the same value the previous line segment had.
+     * @see Polyline::insertPoint()
+     */
+    bool insertPoint(std::size_t pos, std::size_t pnt_id) override;
+
+private:
+    std::vector<bool> _marker;
+};
+
+}  // namespace GeoLib

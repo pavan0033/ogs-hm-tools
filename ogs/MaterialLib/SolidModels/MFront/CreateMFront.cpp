@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "CreateMFront.h"
+
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
+
+#include "CreateMFrontGeneric.h"
+#include "MFront.h"
+
+namespace MaterialLib
+{
+namespace Solids
+{
+namespace MFront
+{
+template <int DisplacementDim>
+std::unique_ptr<MechanicsBase<DisplacementDim>> createMFront(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    std::optional<ParameterLib::CoordinateSystem> const&
+        local_coordinate_system,
+    BaseLib::ConfigTree const& config)
+{
+    auto conf = createMFrontConfig(DisplacementDim, parameters, config);
+
+    return std::make_unique<MFront<DisplacementDim>>(
+        std::move(conf.behaviour), std::move(conf.material_properties),
+        std::move(conf.state_variables_initial_properties),
+        local_coordinate_system, std::move(conf.substepping));
+}
+}  // namespace MFront
+}  // namespace Solids
+}  // namespace MaterialLib
+
+namespace MaterialLib
+{
+namespace Solids
+{
+namespace MFront
+{
+template std::unique_ptr<MechanicsBase<2>> createMFront<2>(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    std::optional<ParameterLib::CoordinateSystem> const&
+        local_coordinate_system,
+    BaseLib::ConfigTree const& config);
+template std::unique_ptr<MechanicsBase<3>> createMFront<3>(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    std::optional<ParameterLib::CoordinateSystem> const&
+        local_coordinate_system,
+    BaseLib::ConfigTree const& config);
+}  // namespace MFront
+}  // namespace Solids
+}  // namespace MaterialLib

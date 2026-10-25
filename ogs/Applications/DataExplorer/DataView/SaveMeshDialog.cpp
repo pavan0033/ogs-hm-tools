@@ -1,0 +1,90 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "SaveMeshDialog.h"
+
+#include <QFileDialog>
+#include <QSettings>
+
+#include "Base/LastSavedFileDirectory.h"
+#include "Base/OGSError.h"
+#include "MeshLib/IO/Legacy/MeshIO.h"
+#include "MeshLib/IO/writeMeshToFile.h"
+#include "MeshLib/Mesh.h"
+
+SaveMeshDialog::SaveMeshDialog(MeshLib::Mesh const& mesh, QDialog* parent)
+    : QDialog(parent), _mesh(mesh)
+{
+    setupUi(this);
+    this->fileNameEdit->setText(LastSavedFileDirectory::getDir() +
+                                QString::fromStdString(_mesh.getName()) +
+                                ".vtu");
+}
+
+void SaveMeshDialog::on_selectDirButton_clicked()
+{
+    QString file_type("VTK Unstructured Grid (*.vtu)");
+#ifndef NDEBUG
+    file_type.append(";;Legacy geometry file (*.msh)");
+#endif  // DEBUG
+    QSettings settings;
+    QString const file_name = QFileDialog::getSaveFileName(
+        this,
+        "Save mesh as...",
+        LastSavedFileDirectory::getDir() +
+            QString::fromStdString(_mesh.getName()),
+        file_type);
+
+    if (!file_name.isEmpty())
+    {
+        this->fileNameEdit->setText(file_name);
+    }
+}
+
+void SaveMeshDialog::on_dataModeBox_currentIndexChanged(int index)
+{
+    // Disable compression on Ascii
+    if (index == 0)
+    {
+        this->compressionCheckBox->setChecked(false);
+        this->compressionCheckBox->setEnabled(false);
+        this->compressionLabel->setEnabled(false);
+    }
+    else
+    {
+        this->compressionCheckBox->setEnabled(true);
+        this->compressionLabel->setEnabled(true);
+    }
+}
+
+void SaveMeshDialog::accept()
+{
+    QString const& file_name(this->fileNameEdit->text());
+    if (file_name.isEmpty())
+    {
+        OGSError::box("No file name entered.");
+        return;
+    }
+
+    QFileInfo fi(file_name);
+    if (fi.suffix().toLower() == "vtu")
+    {
+        int const dataMode = dataModeBox->currentIndex();
+        bool const compress(compressionCheckBox->isChecked());
+        if (MeshLib::IO::writeMeshToFile(_mesh, file_name.toStdString(), {},
+                                         compress, dataMode) != 0)
+        {
+            return;
+        }
+    }
+    if (fi.suffix().toLower() == "msh")
+    {
+        MeshLib::IO::Legacy::MeshIO meshIO;
+        meshIO.setMesh(&_mesh);
+        BaseLib::IO::writeStringToFile(meshIO.writeToString(),
+                                       file_name.toStdString());
+    }
+    LastSavedFileDirectory::setDir(file_name);
+
+    this->done(QDialog::Accepted);
+}

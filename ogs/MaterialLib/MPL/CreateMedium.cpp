@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "CreateMedium.h"
+
+#include "BaseLib/ConfigTree.h"
+#include "CreatePhase.h"
+#include "CreateProperty.h"
+#include "Medium.h"
+#include "ParameterLib/Parameter.h"
+#include "Properties/Properties.h"
+
+namespace MaterialPropertyLib
+{
+std::unique_ptr<Medium> createMedium(
+    int const material_id,
+    int const geometry_dimension,
+    BaseLib::ConfigTree const& config,
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>>& parameters,
+    ParameterLib::CoordinateSystem const* const local_coordinate_system,
+    std::map<std::string,
+             std::unique_ptr<MathLib::PiecewiseLinearInterpolation>> const&
+        curves)
+{
+    // Parsing the phases
+    // Properties of phases may be not required in all the cases.
+    auto&& phases = createPhases(geometry_dimension,
+                                 //! \ogs_file_param{prj__media__medium__phases}
+                                 config.getConfigSubtreeOptional("phases"),
+                                 parameters, local_coordinate_system, curves);
+
+    // Parsing medium properties, overwriting the defaults.
+    auto&& properties =
+        createProperties(geometry_dimension,
+                         //! \ogs_file_param{prj__media__medium__properties}
+                         config.getConfigSubtreeOptional("properties"),
+                         parameters, local_coordinate_system, curves);
+
+    if (phases.empty() && !properties)
+    {
+        OGS_FATAL("Neither tag <phases> nor tag <properties> has been found.");
+    }
+
+    return std::make_unique<Medium>(material_id, std::move(phases),
+                                    std::move(properties));
+}
+
+}  // namespace MaterialPropertyLib

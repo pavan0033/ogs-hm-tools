@@ -1,0 +1,84 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <map>
+#include <memory>
+#include <optional>
+#include <vector>
+
+namespace BaseLib
+{
+class ConfigTree;
+}
+namespace MeshLib
+{
+template <typename T>
+class PropertyVector;
+}
+
+namespace ParameterLib
+{
+struct ParameterBase;
+struct CoordinateSystem;
+}
+
+namespace MaterialLib
+{
+namespace Solids
+{
+template <int DisplacementDim>
+struct MechanicsBase;
+
+template <int DisplacementDim>
+std::unique_ptr<MaterialLib::Solids::MechanicsBase<DisplacementDim>>
+createConstitutiveRelation(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    std::optional<ParameterLib::CoordinateSystem> const&
+        local_coordinate_system,
+    BaseLib::ConfigTree const& config);
+
+extern template std::unique_ptr<MaterialLib::Solids::MechanicsBase<2>>
+createConstitutiveRelation(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    std::optional<ParameterLib::CoordinateSystem> const&
+        local_coordinate_system,
+    BaseLib::ConfigTree const& config);
+
+extern template std::unique_ptr<MaterialLib::Solids::MechanicsBase<3>>
+createConstitutiveRelation(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    std::optional<ParameterLib::CoordinateSystem> const&
+        local_coordinate_system,
+    BaseLib::ConfigTree const& config);
+
+template <int DisplacementDim>
+std::map<int,
+         std::shared_ptr<MaterialLib::Solids::MechanicsBase<DisplacementDim>>>
+createConstitutiveRelations(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    std::optional<ParameterLib::CoordinateSystem> const&
+        local_coordinate_system,
+    MeshLib::PropertyVector<int> const* const material_ids,
+    BaseLib::ConfigTree const& config);
+
+extern template std::map<int,
+                         std::shared_ptr<MaterialLib::Solids::MechanicsBase<2>>>
+createConstitutiveRelations<2>(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    std::optional<ParameterLib::CoordinateSystem> const&
+        local_coordinate_system,
+    MeshLib::PropertyVector<int> const* const material_ids,
+    BaseLib::ConfigTree const& config);
+
+extern template std::map<int,
+                         std::shared_ptr<MaterialLib::Solids::MechanicsBase<3>>>
+createConstitutiveRelations<3>(
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const& parameters,
+    std::optional<ParameterLib::CoordinateSystem> const&
+        local_coordinate_system,
+    MeshLib::PropertyVector<int> const* const material_ids,
+    BaseLib::ConfigTree const& config);
+}  // namespace Solids
+}  // namespace MaterialLib

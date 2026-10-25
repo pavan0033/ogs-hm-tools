@@ -1,0 +1,18 @@
+include:
+  # jobs, can be individually disabled for testing
+  - local: "/scripts/ci/pipelines/linux.yml"
+  - local: "/scripts/ci/pipelines/mac.yml"
+  - local: "/scripts/ci/pipelines/win.yml"
+  - local: "/scripts/ci/jobs/include-what-you-use.yml"
+  - local: "/scripts/ci/jobs/clang-sanitizer.yml"
+  - local: "/scripts/ci/jobs/web-deploy.yml"
+  - local: "/scripts/ci/jobs/release.yml"
+  - local: "/scripts/ci/jobs/test-dev-perf.yml"
+  - local: "/scripts/ci/jobs/build-wheels.yml"
+
+# disabled, downstream pipeline does not work currently
+.ufz-bgr/hpc/tutorial:
+  stage: check
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+  trigger: ufz-bgr/hpc/tutorial

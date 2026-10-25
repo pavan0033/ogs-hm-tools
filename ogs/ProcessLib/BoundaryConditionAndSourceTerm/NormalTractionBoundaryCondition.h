@@ -1,0 +1,91 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <Eigen/Dense>
+
+#include "BoundaryCondition.h"
+#include "MeshLib/MeshSubset.h"
+#include "NormalTractionBoundaryConditionLocalAssembler.h"
+
+namespace ProcessLib
+{
+namespace NormalTractionBoundaryCondition
+{
+class NormalTractionBoundaryConditionLocalAssemblerInterface;
+
+/// The normal traction boundary condition is a special type of Neumann boundary
+/// condition where the given value is applied in the direction of the element's
+/// normal vector \f$\mathbf{n}\f$:
+/// \f[
+///      \bar{t} := \sigma \mathbf{n} = p \mathbf{n},
+/// \f]
+/// where \f$p\f$ is the value on the boundary given by the parameter tag.
+template <int GlobalDim, template <typename /* shp fct */, int /* global dim */>
+                         class LocalAssemblerImplementation>
+class NormalTractionBoundaryCondition final : public BoundaryCondition
+{
+public:
+    /// Create a boundary condition process from given config,
+    /// DOF-table, and a mesh subset for a given variable and its component.
+    /// A local DOF-table, a subset of the given one, is constructed.
+    NormalTractionBoundaryCondition(
+        unsigned const integration_order, unsigned const shapefunction_order,
+        MeshLib::Mesh const& bulk_mesh,
+        NumLib::LocalToGlobalIndexMap const& dof_table_bulk,
+        int const variable_id, MeshLib::Mesh const& bc_mesh,
+        ParameterLib::Parameter<double> const& pressure,
+        bool const evaluate_at_ips=false);
+
+    /// Calls local assemblers which calculate their contributions to the global
+    /// matrix and the right-hand-side.
+    void applyNaturalBC(const double t, std::vector<GlobalVector*> const& x,
+                        int const process_id, GlobalMatrix* K, GlobalVector& b,
+                        GlobalMatrix* Jac) override;
+
+private:
+    MeshLib::Mesh const& _bc_mesh;
+
+    /// Intersection of boundary nodes and bulk mesh subset for the
+    /// variable_id/component_id pair.
+    std::vector<MeshLib::Node*> _nodes_subset;
+
+    std::unique_ptr<MeshLib::MeshSubset const> _mesh_subset_all_nodes;
+
+    /// Local dof table, a subset of the global one restricted to the
+    /// participating number of _elements of the boundary condition.
+    std::unique_ptr<NumLib::LocalToGlobalIndexMap> _dof_table_boundary;
+
+    /// Integration order for integration over the lower-dimensional elements
+    unsigned const _integration_order;
+
+    /// Local assemblers for each element of number of _elements.
+    std::vector<
+        std::unique_ptr<NormalTractionBoundaryConditionLocalAssemblerInterface>>
+        _local_assemblers;
+
+    ParameterLib::Parameter<double> const& _pressure;
+
+    /// Normal vectors for each element in the boundary condition mesh.
+    std::vector<Eigen::Vector3d> _element_normals;
+};
+
+std::string parseNormalTractionBoundaryCondition(
+    BaseLib::ConfigTree const& config);
+
+template <int GlobalDim>
+std::unique_ptr<NormalTractionBoundaryCondition<
+    GlobalDim, NormalTractionBoundaryConditionLocalAssembler>>
+createNormalTractionBoundaryCondition(
+    std::string const& parameter_name, MeshLib::Mesh const& bc_mesh,
+    MeshLib::Mesh const& bulk_mesh,
+    NumLib::LocalToGlobalIndexMap const& dof_table, int const variable_id,
+    unsigned const integration_order, unsigned const shapefunction_order,
+    std::vector<std::unique_ptr<ParameterLib::ParameterBase>> const&
+        parameters, bool const evaluate_at_ips=false);
+
+}  // namespace NormalTractionBoundaryCondition
+}  // namespace ProcessLib
+
+#include "NormalTractionBoundaryCondition-impl.h"

@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include "MeshLib/Elements/Element.h"
+#include "NumLib/DOF/LocalToGlobalIndexMap.h"
+#include "NumLib/Fem/Integration/IntegrationMethodRegistry.h"
+
+namespace ProcessLib::ThermoRichardsMechanics
+{
+template <int DisplacementDim, typename ConstitutiveTraits>
+struct LocalAssemblerInterface;
+
+template <int DisplacementDim, typename ConstitutiveTraits>
+struct ThermoRichardsMechanicsProcessData;
+
+template <int DisplacementDim, typename ConstitutiveTraits>
+void createLocalAssemblers(
+    std::vector<MeshLib::Element*> const& mesh_elements,
+    NumLib::LocalToGlobalIndexMap const& dof_table,
+    std::vector<std::unique_ptr<
+        LocalAssemblerInterface<DisplacementDim, ConstitutiveTraits>>>&
+        local_assemblers,
+    NumLib::IntegrationOrder const integration_order,
+    bool const is_axially_symmetric,
+    ThermoRichardsMechanicsProcessData<DisplacementDim, ConstitutiveTraits>&
+        process_data);
+}  // namespace ProcessLib::ThermoRichardsMechanics

@@ -1,0 +1,278 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include <tclap/CmdLine.h>
+
+#include <algorithm>
+#include <string>
+
+#include "BaseLib/FileTools.h"
+#include "BaseLib/MPI.h"
+#include "BaseLib/RunTime.h"
+#include "BaseLib/TCLAPArguments.h"
+#include "InfoLib/GitInfo.h"
+#ifndef WIN32
+#include "BaseLib/MemWatch.h"
+#endif
+
+#include "Applications/FileIO/Gmsh/GmshReader.h"
+#include "BaseLib/Logging.h"
+#include "GeoLib/AABB.h"
+#include "MeshGeoToolsLib/IdentifySubdomainMesh.h"
+#include "MeshGeoToolsLib/MeshNodeSearcher.h"
+#include "MeshLib/IO/writeMeshToFile.h"
+#include "MeshLib/Mesh.h"
+#include "MeshLib/MeshSearch/ElementSearch.h"
+#include "MeshLib/Utils/DuplicateMeshComponents.h"
+#include "MeshToolsLib/MeshEditing/RemoveMeshComponents.h"
+#include "MeshToolsLib/MeshInformation.h"
+
+static std::unique_ptr<MeshLib::Mesh> createMeshFromElements(
+    MeshLib::Mesh const& mesh,
+    std::vector<MeshLib::Element*> const& selected_elements,
+    std::string mesh_name)
+{
+    // Create boundary mesh.
+    auto nodes = copyNodeVector(mesh.getNodes());
+    auto elements = copyElementVector(selected_elements, nodes);
+
+    // Cleanup unused nodes
+    MeshToolsLib::removeMarkedNodes(
+        MeshToolsLib::markUnusedNodes(elements, nodes), nodes);
+
+    return std::make_unique<MeshLib::Mesh>(std::move(mesh_name), nodes,
+                                           elements);
+}
+
+static std::vector<std::unique_ptr<MeshLib::Mesh>> extractBoundaryMeshes(
+    MeshLib::Mesh const& mesh, std::vector<std::size_t> selected_element_ids)
+{
+    auto const material_ids = materialIDs(mesh);
+    if (material_ids == nullptr)
+    {
+        OGS_FATAL(
+            "GMSH2OGS: Expected material ids to be present in the mesh to "
+            "extract boundary meshes.");
+    }
+
+    std::vector<std::unique_ptr<MeshLib::Mesh>> boundary_meshes;
+
+    auto const& elements = mesh.getElements();
+
+    while (!selected_element_ids.empty())
+    {
+        // Partition in two blocks, with elements for the material id at
+        // the end, s.t. one can erase them easily.
+        int const material_id = (*material_ids)[selected_element_ids.back()];
+        auto split = std::partition(
+            begin(selected_element_ids), end(selected_element_ids),
+            [&material_id, &material_ids](int const id)
+            { return (*material_ids)[id] != material_id; });
+
+        // Add elements with same material id to the mesh.
+        std::vector<MeshLib::Element*> single_material_elements;
+        single_material_elements.reserve(
+            std::distance(split, end(selected_element_ids)));
+        std::transform(split, end(selected_element_ids),
+                       std::back_inserter(single_material_elements),
+                       [&](int const id) { return elements[id]; });
+
+        // Remove already extracted elements.
+        selected_element_ids.erase(split, end(selected_element_ids));
+
+        // Create boundary mesh and identify the nodes/elements.
+        boundary_meshes.push_back(createMeshFromElements(
+            mesh, single_material_elements, std::to_string(material_id)));
+    }
+    return boundary_meshes;
+}
+
+static void identifyAndWriteBoundaryMeshes(
+    MeshLib::Mesh const& mesh,
+    std::string const& file_name,
+    std::vector<std::unique_ptr<MeshLib::Mesh>>& boundary_meshes)
+{
+    // Bulk mesh node searcher usef for boundary mesh identification.
+    auto const& mesh_node_searcher =
+        MeshGeoToolsLib::MeshNodeSearcher::getMeshNodeSearcher(
+            mesh,
+            std::make_unique<MeshGeoToolsLib::SearchLength>(
+                0));  // Exact match of nodes.
+
+    for (auto& boundary_mesh : boundary_meshes)
+    {
+        identifySubdomainMesh(*boundary_mesh, mesh, mesh_node_searcher);
+
+        // Save the boundary mesh.
+        auto boundary_mesh_file_name = BaseLib::dropFileExtension(file_name) +
+                                       '_' + boundary_mesh->getName() +
+                                       BaseLib::getFileExtension(file_name);
+
+        if (MeshLib::IO::writeMeshToFile(*boundary_mesh,
+                                         boundary_mesh_file_name) != 0)
+        {
+            continue;
+        }
+    }
+}
+
+int main(int argc, char* argv[])
+{
+    TCLAP::CmdLine cmd(
+        "Converting meshes in gmsh file format (ASCII, version 2.2) to a vtk "
+        "unstructured grid file (new OGS file format) or to the old OGS file "
+        "format - see options.\n\n"
+        "OpenGeoSys-6 software, version " +
+            GitInfoLib::GitInfo::ogs_version +
+            ".\n"
+            "Copyright (c) 2012-2026, OpenGeoSys Community "
+            "(http://www.opengeosys.org)",
+        ' ', GitInfoLib::GitInfo::ogs_version);
+
+    TCLAP::ValueArg<std::string> ogs_mesh_arg(
+        "o",
+        "out",
+        "Output (.msh | .vtk). Filename for output mesh (if extension is .msh, "
+        "old OGS-5 file format "
+        "is written, if extension is .vtu, a vtk unstructure grid file is "
+        "written (OGS-6 mesh format))",
+        true,
+        "",
+        "OUTPUT_FILE");
+    cmd.add(ogs_mesh_arg);
+
+    TCLAP::ValueArg<std::string> gmsh_mesh_arg("i", "in", "Input (.msh) file",
+                                               true, "", "INPUT_FILE");
+    cmd.add(gmsh_mesh_arg);
+
+    TCLAP::SwitchArg valid_arg("v", "validation", "validate the mesh");
+    cmd.add(valid_arg);
+
+    TCLAP::SwitchArg create_boundary_meshes_arg(
+        "b", "boundaries", "if set, boundary meshes will be generated");
+    cmd.add(create_boundary_meshes_arg);
+
+    TCLAP::SwitchArg exclude_lines_arg(
+        "e", "exclude-lines",
+        "if set, lines will not be written to the ogs mesh");
+    cmd.add(exclude_lines_arg);
+
+    auto log_level_arg = BaseLib::makeLogLevelArg();
+    cmd.add(log_level_arg);
+
+    std::string const gmsh2_opt_message =
+        "if set, the mesh is generated with Gmsh version 2 and it is saved"
+        " (or exported) as \"Version 2 ASCII\" format";
+
+    TCLAP::SwitchArg gmsh2_arg("", "gmsh2_physical_id", gmsh2_opt_message);
+    cmd.add(gmsh2_arg);
+
+    cmd.parse(argc, argv);
+
+    BaseLib::MPI::Setup mpi_setup(argc, argv);
+    BaseLib::initOGSLogger(log_level_arg.getValue());
+
+    // *** read mesh
+    INFO("Reading {:s}.", gmsh_mesh_arg.getValue());
+#ifndef WIN32
+    BaseLib::MemWatch mem_watch;
+    unsigned long mem_without_mesh(mem_watch.getVirtMemUsage());
+#endif
+    BaseLib::RunTime run_time;
+    run_time.start();
+    MeshLib::Mesh* mesh(FileIO::GMSH::readGMSHMesh(gmsh_mesh_arg.getValue(),
+                                                   gmsh2_arg.getValue()));
+
+    if (mesh == nullptr)
+    {
+        INFO("Could not read mesh from {:s}.", gmsh_mesh_arg.getValue());
+        return -1;
+    }
+#ifndef WIN32
+    INFO("Mem for mesh: {} MiB",
+         (mem_watch.getVirtMemUsage() - mem_without_mesh) / (1024 * 1024));
+#endif
+
+    INFO("Time for reading: {:f} seconds.", run_time.elapsed());
+    INFO("Read {:d} nodes and {:d} elements.", mesh->getNumberOfNodes(),
+         mesh->getNumberOfElements());
+
+    // Optionally remove line elements or create boundary meshes.
+    if (exclude_lines_arg.getValue() || create_boundary_meshes_arg.getValue())
+    {
+        auto ex = MeshLib::ElementSearch(*mesh);
+        ex.searchByElementType(MeshLib::MeshElemType::LINE);
+        auto const& selected_element_ids = ex.getSearchedElementIDs();
+
+        // First we extract the boundary meshes, then optionally remove the line
+        // elements, and only then run the node/element identification and write
+        // the meshes.
+
+        std::vector<std::unique_ptr<MeshLib::Mesh>> boundary_meshes;
+        if (create_boundary_meshes_arg.getValue())
+        {
+            boundary_meshes =
+                extractBoundaryMeshes(*mesh, selected_element_ids);
+        }
+
+        if (exclude_lines_arg.getValue())
+        {
+            auto m = MeshToolsLib::removeElements(
+                *mesh, selected_element_ids, mesh->getName() + "-withoutLines");
+            if (m != nullptr)
+            {
+                INFO("Removed {:d} lines.",
+                     mesh->getNumberOfElements() - m->getNumberOfElements());
+                std::swap(m, mesh);
+                delete m;
+            }
+            else
+            {
+                INFO("Mesh does not contain any lines.");
+            }
+        }
+
+        if (create_boundary_meshes_arg.getValue())
+        {
+            identifyAndWriteBoundaryMeshes(*mesh, ogs_mesh_arg.getValue(),
+                                           boundary_meshes);
+        }
+    }
+    // *** print meshinformation
+
+    INFO("Please check your mesh carefully!");
+    INFO(
+        "Degenerated or redundant mesh elements can cause OGS to stop or "
+        "misbehave.");
+    INFO("Use the -e option to delete redundant line elements.");
+
+    // Geometric information
+    const GeoLib::AABB aabb =
+        MeshToolsLib::MeshInformation::getBoundingBox(*mesh);
+    INFO("Axis aligned bounding box: {}", aabb);
+
+    auto const [min, max] = minMaxEdgeLength(mesh->getElements());
+    INFO("Edge length: [{:g}, {:g}]", min, max);
+
+    // Element information
+    MeshToolsLib::MeshInformation::writeAllNumbersOfElementTypes(*mesh);
+
+    MeshToolsLib::MeshInformation::writePropertyVectorInformation(*mesh);
+
+    if (valid_arg.isSet())
+    {
+        MeshToolsLib::MeshInformation::writeMeshValidationResults(*mesh,
+                                                                  min * 1e-6);
+        INFO(
+            "Remark: Nodes n0 and n1 are considered to be 'collapsible' if the "
+            "dist(n0, n1) is less than minimal edge length of elements in the "
+            "mesh times 1e-6");
+    }
+
+    // *** write mesh in new format
+    int const write_result =
+        MeshLib::IO::writeMeshToFile(*mesh, ogs_mesh_arg.getValue());
+
+    delete mesh;
+    return write_result == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}

@@ -1,0 +1,10 @@
+clang sanitizer:
+  stage: check
+  extends:
+    - .template-build-linux
+    - .rules-manual
+  tags: [shell, envinf]
+  needs: [meta]
+  variables:
+    CMAKE_PRESET: sanitizer
+    CMAKE_ARGS: "-DOGS_CTEST_MAX_RUNTIME=60"

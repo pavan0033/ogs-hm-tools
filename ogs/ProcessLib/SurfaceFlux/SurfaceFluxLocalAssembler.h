@@ -1,0 +1,217 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#pragma once
+
+#include <Eigen/Geometry>
+
+#include "BaseLib/Error.h"
+#include "MeshLib/Elements/Elements.h"
+#include "MeshLib/Elements/FaceRule.h"
+#include "MeshLib/Elements/MapBulkElementPoint.h"
+#include "NumLib/DOF/DOFTableUtil.h"
+#include "NumLib/Fem/InitShapeMatrices.h"
+#include "NumLib/Fem/Integration/GenericIntegrationMethod.h"
+#include "NumLib/Fem/ShapeMatrixPolicy.h"
+
+namespace ProcessLib
+{
+class SurfaceFluxLocalAssemblerInterface
+{
+public:
+    virtual ~SurfaceFluxLocalAssemblerInterface() = default;
+
+    virtual void integrate(
+        std::size_t const element_id,
+        std::vector<GlobalVector*> const& x,
+        MeshLib::PropertyVector<double>& specific_flux,
+        double const t,
+        MeshLib::Mesh const& bulk_mesh,
+        std::function<Eigen::Vector3d(std::size_t const,
+                                      MathLib::Point3d const&, double const,
+                                      std::vector<GlobalVector*> const&)>) = 0;
+};
+
+template <typename ShapeFunction, int GlobalDim>
+class SurfaceFluxLocalAssembler final
+    : public SurfaceFluxLocalAssemblerInterface
+{
+protected:
+    using ShapeMatricesType = ShapeMatrixPolicyType<ShapeFunction, GlobalDim>;
+    using NodalMatrixType = typename ShapeMatricesType::NodalMatrixType;
+    using NodalVectorType = typename ShapeMatricesType::NodalVectorType;
+
+public:
+    /// Precomputes the shape matrices for a given surface element.
+    /// @param surface_element The surface element used for precomputing the
+    /// shape matrices used later on for the integration.
+    /// @param is_axially_symmetric corrects integration measure for cylinder
+    /// coordinates.
+    /// @param bulk_element_ids The id of the corresponding element in the bulk
+    /// mesh.
+    /// @param bulk_face_ids The id of the corresponding face in the bulk
+    /// element.
+    /// @param integration_method The integration method used.
+    SurfaceFluxLocalAssembler(
+        MeshLib::Element const& surface_element,
+        std::size_t /*const local_matrix_size*/,
+        NumLib::GenericIntegrationMethod const& integration_method,
+        bool const is_axially_symmetric,
+        MeshLib::PropertyVector<std::size_t> const& bulk_element_ids,
+        MeshLib::PropertyVector<std::size_t> const& bulk_face_ids)
+        : _surface_element(surface_element),
+          _integration_method(integration_method),
+          _bulk_element_id(bulk_element_ids[surface_element.getID()]),
+          _bulk_face_id(bulk_face_ids[surface_element.getID()])
+    {
+        auto const n_integration_points =
+            _integration_method.getNumberOfPoints();
+
+        auto const shape_matrices =
+            NumLib::initShapeMatrices<ShapeFunction, ShapeMatricesType,
+                                      GlobalDim, NumLib::ShapeMatrixType::N_J>(
+                _surface_element, is_axially_symmetric, _integration_method);
+        for (std::size_t ip = 0; ip < n_integration_points; ++ip)
+        {
+            _detJ_times_integralMeasure.push_back(
+                shape_matrices[ip].detJ * shape_matrices[ip].integralMeasure);
+        }
+    }
+
+    /// Integration for the element with the id \c element_id.
+    /// @param element_id id of the element
+    /// @param x The global vector containing the values for numerical
+    /// integration.
+    /// @param specific_flux PropertyVector the integration result will be
+    /// stored into, where specific_flux has the same number of entries like
+    /// mesh elements exists.
+    /// @param t The integration is performed at the time t.
+    /// @param bulk_mesh Stores a reference to the bulk mesh that is needed to
+    /// fetch the information for the integration over the surface mesh.
+    /// @param getFlux function that calculates the flux in the integration
+    /// points of the face elements of the bulk element that belongs to the
+    /// surface.
+    void integrate(std::size_t const element_id,
+                   std::vector<GlobalVector*> const& x,
+                   MeshLib::PropertyVector<double>& specific_flux,
+                   double const t,
+                   MeshLib::Mesh const& bulk_mesh,
+                   std::function<Eigen::Vector3d(
+                       std::size_t const, MathLib::Point3d const&, double const,
+                       std::vector<GlobalVector*> const&)>
+                       getFlux) override
+    {
+        auto const& bulk_element = *bulk_mesh.getElement(_bulk_element_id);
+        auto const surface_element_normal =
+            getSurfaceNormal(_surface_element, bulk_element);
+
+        double element_area = 0.0;
+        std::size_t const n_integration_points =
+            _integration_method.getNumberOfPoints();
+        // specific_flux[id_of_element] +=
+        //   int_{\Gamma_e} \alpha \cdot flux \cdot normal \d \Gamma /
+        //   element_area
+        for (std::size_t ip(0); ip < n_integration_points; ip++)
+        {
+            auto const& wp = _integration_method.getWeightedPoint(ip);
+
+            auto const bulk_element_point =
+                MeshLib::getBulkElementPoint(bulk_element, _bulk_face_id, wp);
+            auto const bulk_flux =
+                getFlux(_bulk_element_id, bulk_element_point, t, x);
+            for (int component_id(0);
+                 component_id < specific_flux.getNumberOfGlobalComponents();
+                 ++component_id)
+            {
+                // TODO find solution for 2d case
+                double const bulk_grad_times_normal(
+                    Eigen::Map<Eigen::RowVectorXd const>(bulk_flux.data(),
+                                                         bulk_flux.size())
+                        .dot(surface_element_normal));
+
+                specific_flux.getComponent(element_id, component_id) +=
+                    bulk_grad_times_normal * _detJ_times_integralMeasure[ip] *
+                    wp.getWeight();
+            }
+            element_area += _detJ_times_integralMeasure[ip] * wp.getWeight();
+        }
+        for (int component_id(0);
+             component_id < specific_flux.getNumberOfGlobalComponents();
+             ++component_id)
+        {
+            specific_flux.getComponent(element_id, component_id) /=
+                element_area;
+        }
+    }
+
+private:
+    static Eigen::Vector3d getSurfaceNormal(
+        MeshLib::Element const& surface_element,
+        MeshLib::Element const& bulk_element)
+    {
+        Eigen::Vector3d surface_element_normal;
+
+        if (surface_element.getGeomType() == MeshLib::MeshElemType::LINE)
+        {
+            auto const bulk_normal =
+                MeshLib::FaceRule::getSurfaceNormal(bulk_element);
+            auto const& l0 = surface_element.getNode(0)->asEigenVector3d();
+            auto const& l1 = surface_element.getNode(1)->asEigenVector3d();
+            Eigen::Vector3d const line = l1 - l0;
+            surface_element_normal = line.cross(bulk_normal);
+        }
+        else if (surface_element.getGeomType() == MeshLib::MeshElemType::POINT)
+        {
+            // The "surface" of a 1D bulk element (a line) is a single point
+            // coinciding with one of its two end nodes; the direction from
+            // that point to the other end node is this class's normal for
+            // that point (there is no cross product available in 0D to
+            // derive it from the surface element itself, unlike the LINE and
+            // default cases above). As with the LINE/default cases, this is
+            // not the literal geometric outward normal but the orientation
+            // that, per the inflow-positive convention documented below,
+            // gives an intuitive flux sign (see the comment on
+            // `surface_element_normal.normalize()` further down).
+            auto const& x = surface_element.getNode(0)->asEigenVector3d();
+            auto const& a = bulk_element.getNode(0)->asEigenVector3d();
+            auto const& b = bulk_element.getNode(1)->asEigenVector3d();
+            // a + b - 2 * x evaluates to a - b or to b - a, depending on
+            // whether x coincides with the start (a) or the end (b) of the
+            // (assumed straight) line element.
+            surface_element_normal = a + b - 2 * x;
+            // Written as a negated '> 0.0' rather than '<= 0.0' so that a
+            // NaN squaredNorm() (already-corrupted coordinates) is also
+            // rejected, matching the pattern also used for the guard in
+            // NumLib/ODESolver/AndersonAcceleration.cpp.
+            if (!(surface_element_normal.squaredNorm() > 0.0))
+            {
+                OGS_FATAL(
+                    "SurfaceFlux: the bulk line element {:d} has zero "
+                    "length (its two end nodes coincide), so no boundary "
+                    "normal can be derived for it.",
+                    bulk_element.getID());
+            }
+        }
+        else
+        {
+            surface_element_normal =
+                MeshLib::FaceRule::getSurfaceNormal(surface_element);
+        }
+        surface_element_normal.normalize();
+        // At the moment (2016-09-28) the surface normal is not oriented
+        // according to the right hand rule. Thus for an intuitive flux
+        // output, i.e., inflow has positive sign, outflow has negative
+        // sign, the normal must not be multiplied by -1.
+        return surface_element_normal;
+    };
+
+    MeshLib::Element const& _surface_element;
+
+    std::vector<double> _detJ_times_integralMeasure;
+
+    NumLib::GenericIntegrationMethod const& _integration_method;
+    std::size_t const _bulk_element_id;
+    std::size_t const _bulk_face_id;
+};
+
+}  // namespace ProcessLib

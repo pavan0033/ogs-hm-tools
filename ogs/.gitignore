@@ -1,0 +1,41 @@
+*.bak*
+/build*/
+*.sw[op]
+tags
+.ExternalData_*
+.DS_Store
+
+# CLion IDE project files
+*.iml
+.idea
+
+# Visual Studio Code project files
+.vscode
+
+*.pyc
+.venv
+
+Tests/**/*.md5
+Tests/Data/Parabolic/HT/InvalidProjectFiles/*.prj
+Tests/Data/_out
+
+CMakeUserPresets.json
+scripts/cmake/vtk-*.patch
+
+.snakemake
+
+# clangd and other language servers' caches
+.cache
+.ccls-cache
+
+# VS Code devcontainer
+/.cpm
+nohup.out
+
+# Python build
+*.egg-info/
+/wheelhouse
+.ipynb_checkpoints
+/Applications/Python/_version.py
+
+web/.hugo_build.lock

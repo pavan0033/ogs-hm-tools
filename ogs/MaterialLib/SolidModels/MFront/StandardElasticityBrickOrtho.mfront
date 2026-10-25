@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+@DSL Implicit;
+@Behaviour StandardElasticityBrickOrtho;
+@Author Thomas Nagel;
+@Date 17/01/2020;
+
+@Algorithm NewtonRaphson;
+
+@OrthotropicBehaviour<Pipe>;
+@Brick StandardElasticity;
+
+@Theta 1.0;       // time integration scheme
+@Epsilon 1e-14;  // tolerance of local stress integration algorithm
+@ModellingHypotheses{".+"};
+
+@RequireStiffnessTensor<UnAltered>;
+
+@InitLocalVariables
+{
+    // Compute initial elastic strain
+    const auto S = invert(D);
+    eel = S * sig;
+}
+
+@Integrator
+{
+}

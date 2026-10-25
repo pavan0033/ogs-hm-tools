@@ -1,0 +1,10 @@
+ogs_add_process(
+    HeatTransportBHE
+    DIRECTORIES
+    .
+    BHE
+    BoundaryConditions
+    LocalAssemblers
+    PRIVATE_LIBRARIES
+    $<$<TARGET_EXISTS:pybind11::pybind11>:pybind11::module>
+)

@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: Copyright (c) OpenGeoSys Community (opengeosys.org)
+// SPDX-License-Identifier: BSD-3-Clause
+
+#include "CurveScaledParameter.h"
+
+#include "Utils.h"
+
+namespace ParameterLib
+{
+std::unique_ptr<ParameterBase> createCurveScaledParameter(
+    std::string const& name,
+    BaseLib::ConfigTree const& config,
+    std::map<std::string,
+             std::unique_ptr<MathLib::PiecewiseLinearInterpolation>> const&
+        curves)
+{
+    //! \ogs_file_param{prj__parameters__parameter__type}
+    config.checkConfigParameter("type", "CurveScaled");
+
+    //! \ogs_file_param{prj__parameters__parameter__CurveScaled__curve}
+    auto curve_name = config.getConfigParameter<std::string>("curve");
+    DBUG("Using curve {:s}", curve_name);
+
+    auto const curve_it = curves.find(curve_name);
+    if (curve_it == curves.end())
+    {
+        OGS_FATAL("Curve `{:s}' does not exists.", curve_name);
+    }
+
+    auto referenced_parameter_name =
+        //! \ogs_file_param{prj__parameters__parameter__CurveScaled__parameter}
+        config.getConfigParameter<std::string>("parameter");
+    DBUG("Using parameter {:s}", referenced_parameter_name);
+
+    // TODO other data types than only double
+    return std::make_unique<CurveScaledParameter<double>>(
+        name, *curve_it->second, referenced_parameter_name);
+}
+
+}  // namespace ParameterLib

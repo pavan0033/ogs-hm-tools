@@ -1,0 +1,37 @@
+.code coverage:
+  stage: check
+  needs: [meta]
+  variables:
+    BUILD_TESTS: true
+    BUILD_CTEST: false
+    CMAKE_ARGS: >-
+      -DOGS_USE_PIP=ON
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - when: on_success
+  script:
+    - !reference [.template-build-linux, script]
+    - cmake --build --preset $CMAKE_PRESET -t ctest
+    - cmake --build --preset $CMAKE_PRESET -t process_coverage
+  after_script:
+    - build_dir_prefix=${CMAKE_PRESET_BUILD_DIR_PREFIX:-}
+    - ln -s ../../build/${build_dir_prefix}${CMAKE_PRESET} build/$CMAKE_PRESET
+  artifacts:
+    when: always
+    paths:
+      - build/$CMAKE_PRESET/coverage/cpp-coverage.json
+      - build/$CMAKE_PRESET/logs/*.txt
+    expire_in: 1 week
+
+code coverage:
+  extends: .code coverage
+  tags: [shell, envinf]
+  variables:
+    CMAKE_PRESET: coverage
+
+code coverage petsc:
+  extends: .code coverage
+  tags: [shell, envinf, petsc]
+  variables:
+    CMAKE_PRESET: coverage-petsc
