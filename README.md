@@ -8,6 +8,20 @@ The first prototype targets Linux x86_64 with CPython 3.12. It has been exercise
 in a separate Python environment on the development host. A clean-machine test
 and the complete bundled dependency license review remain pending.
 
+## HM solver source
+
+The custom OGS HM source is published on the
+[`hm-development` branch](https://github.com/pavan0033/ogs-hm-tools/tree/hm-development/ogs).
+See its [source guide](https://github.com/pavan0033/ogs-hm-tools/blob/hm-development/HM_SOURCE_README.md)
+for contents, exclusions and build scope. The source snapshot is based on upstream
+OGS plus the current HM changes; it includes custom unit tests but excludes large
+upstream datasets, research results and the external imported HS material kernel.
+
+Source commit for future toolkit integration:
+[`f6fa80fd9ef1](https://github.com/pavan0033/ogs-hm-tools/commit/f6fa80fd9ef147e5ce4942687e01744e60c7b76d).
+The prototype wheel predates this source publication and has not been rebuilt
+from this commit. Public binary installation remains in preparation.
+
 ## Educational notebooks
 
 - `notebooks/00_INSTALL_AND_CHECK_HM.ipynb`: install the supplied local prototype

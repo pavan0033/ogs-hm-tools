@@ -11,5 +11,12 @@
   },
   "platform": "Linux x86_64, CPython 3.12",
   "existing_test_scope": "isolated Python environment on development host; not a clean OS test",
-  "repository_url": "https://github.com/pavan0033/ogs-hm-tools"
+  "repository_url": "https://github.com/pavan0033/ogs-hm-tools",
+  "hm_source": {
+    "branch": "hm-development",
+    "commit": "f6fa80fd9ef147e5ce4942687e01744e60c7b76d",
+    "path": "ogs/",
+    "build_from_this_commit_tested": false,
+    "existing_wheel_built_from_this_commit": false
+  }
 }
